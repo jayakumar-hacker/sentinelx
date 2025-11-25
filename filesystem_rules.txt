@@ -1,0 +1,291 @@
+---
+# Module 1: Filesystem Hardening Rules
+module_name: "Filesystem Security"
+module_id: "01_filesystem"
+version: "1.0.0"
+
+rules:
+  # Kernel Module Restrictions
+  - id: FS-001
+    category: "Kernel Module"
+    description: "Ensure cramfs kernel module is not available"
+    severity: "medium"
+    apply: |
+      echo "install cramfs /bin/true" >> /etc/modprobe.d/cramfs.conf
+      rmmod cramfs 2>/dev/null || true
+    verify: |
+      modprobe -n -v cramfs 2>&1 | grep -q "install /bin/true" && echo "PASS" || echo "FAIL"
+    rollback: |
+      sed -i '/install cramfs/d' /etc/modprobe.d/cramfs.conf
+    notes: "cramfs is a compressed read-only filesystem rarely needed on modern systems"
+
+  - id: FS-002
+    category: "Kernel Module"
+    description: "Ensure freevxfs kernel module is not available"
+    severity: "medium"
+    apply: |
+      echo "install freevxfs /bin/true" >> /etc/modprobe.d/freevxfs.conf
+      rmmod freevxfs 2>/dev/null || true
+    verify: |
+      modprobe -n -v freevxfs 2>&1 | grep -q "install /bin/true" && echo "PASS" || echo "FAIL"
+    rollback: |
+      sed -i '/install freevxfs/d' /etc/modprobe.d/freevxfs.conf
+    notes: "freevxfs is Veritas filesystem, not commonly used"
+
+  - id: FS-003
+    category: "Kernel Module"
+    description: "Ensure hfs kernel module is not available"
+    severity: "medium"
+    apply: |
+      echo "install hfs /bin/true" >> /etc/modprobe.d/hfs.conf
+      rmmod hfs 2>/dev/null || true
+    verify: |
+      modprobe -n -v hfs 2>&1 | grep -q "install /bin/true" && echo "PASS" || echo "FAIL"
+    rollback: |
+      sed -i '/install hfs/d' /etc/modprobe.d/hfs.conf
+    notes: "HFS is Apple filesystem, not needed on Linux servers"
+
+  - id: FS-004
+    category: "Kernel Module"
+    description: "Ensure hfsplus kernel module is not available"
+    severity: "medium"
+    apply: |
+      echo "install hfsplus /bin/true" >> /etc/modprobe.d/hfsplus.conf
+      rmmod hfsplus 2>/dev/null || true
+    verify: |
+      modprobe -n -v hfsplus 2>&1 | grep -q "install /bin/true" && echo "PASS" || echo "FAIL"
+    rollback: |
+      sed -i '/install hfsplus/d' /etc/modprobe.d/hfsplus.conf
+    notes: "HFS+ is Apple filesystem, not needed on Linux servers"
+
+  - id: FS-005
+    category: "Kernel Module"
+    description: "Ensure jffs2 kernel module is not available"
+    severity: "medium"
+    apply: |
+      echo "install jffs2 /bin/true" >> /etc/modprobe.d/jffs2.conf
+      rmmod jffs2 2>/dev/null || true
+    verify: |
+      modprobe -n -v jffs2 2>&1 | grep -q "install /bin/true" && echo "PASS" || echo "FAIL"
+    rollback: |
+      sed -i '/install jffs2/d' /etc/modprobe.d/jffs2.conf
+    notes: "jffs2 is for flash memory devices, typically not needed"
+
+  - id: FS-006
+    category: "Kernel Module"
+    description: "Ensure overlayfs kernel module is not available"
+    severity: "low"
+    apply: |
+      echo "install overlay /bin/true" >> /etc/modprobe.d/overlay.conf
+      rmmod overlay 2>/dev/null || true
+    verify: |
+      modprobe -n -v overlay 2>&1 | grep -q "install /bin/true" && echo "PASS" || echo "FAIL"
+    rollback: |
+      sed -i '/install overlay/d' /etc/modprobe.d/overlay.conf
+    notes: "Note: Docker/containers may require overlayfs. Review before applying."
+
+  - id: FS-007
+    category: "Kernel Module"
+    description: "Ensure squashfs kernel module is not available"
+    severity: "medium"
+    apply: |
+      echo "install squashfs /bin/true" >> /etc/modprobe.d/squashfs.conf
+      rmmod squashfs 2>/dev/null || true
+    verify: |
+      modprobe -n -v squashfs 2>&1 | grep -q "install /bin/true" && echo "PASS" || echo "FAIL"
+    rollback: |
+      sed -i '/install squashfs/d' /etc/modprobe.d/squashfs.conf
+    notes: "squashfs is compressed read-only filesystem"
+
+  - id: FS-008
+    category: "Kernel Module"
+    description: "Ensure udf kernel module is not available"
+    severity: "medium"
+    apply: |
+      echo "install udf /bin/true" >> /etc/modprobe.d/udf.conf
+      rmmod udf 2>/dev/null || true
+    verify: |
+      modprobe -n -v udf 2>&1 | grep -q "install /bin/true" && echo "PASS" || echo "FAIL"
+    rollback: |
+      sed -i '/install udf/d' /etc/modprobe.d/udf.conf
+    notes: "UDF is for optical media, typically not needed on servers"
+
+  - id: FS-009
+    category: "Kernel Module"
+    description: "Ensure usb-storage kernel module is not available"
+    severity: "high"
+    apply: |
+      echo "install usb-storage /bin/true" >> /etc/modprobe.d/usb-storage.conf
+      rmmod usb_storage 2>/dev/null || true
+    verify: |
+      modprobe -n -v usb-storage 2>&1 | grep -q "install /bin/true" && echo "PASS" || echo "FAIL"
+    rollback: |
+      sed -i '/install usb-storage/d' /etc/modprobe.d/usb-storage.conf
+    notes: "Prevents USB storage devices from being mounted"
+
+  # Partition Configurations
+  - id: FS-010
+    category: "Partition"
+    description: "Ensure /tmp is a separate partition"
+    severity: "high"
+    apply: |
+      if ! mountpoint -q /tmp; then
+        echo "tmpfs /tmp tmpfs defaults,rw,nosuid,nodev,noexec,relatime 0 0" >> /etc/fstab
+        systemctl unmask tmp.mount 2>/dev/null || true
+        systemctl enable tmp.mount 2>/dev/null || true
+      fi
+    verify: |
+      mountpoint -q /tmp && echo "PASS" || echo "FAIL"
+    rollback: |
+      sed -i '\|/tmp|d' /etc/fstab
+    notes: "Separating /tmp prevents resource exhaustion attacks"
+
+  - id: FS-011
+    category: "Partition"
+    description: "Ensure nodev option set on /tmp partition"
+    severity: "high"
+    apply: |
+      if mountpoint -q /tmp; then
+        mount -o remount,nodev /tmp
+        sed -i 's|\(/tmp.*tmpfs.*\)|\1,nodev|' /etc/fstab
+      fi
+    verify: |
+      mount | grep -E '\s/tmp\s' | grep -q nodev && echo "PASS" || echo "FAIL"
+    rollback: |
+      mount -o remount,dev /tmp 2>/dev/null || true
+    notes: "nodev prevents device files from being interpreted on /tmp"
+
+  - id: FS-012
+    category: "Partition"
+    description: "Ensure nosuid option set on /tmp partition"
+    severity: "high"
+    apply: |
+      if mountpoint -q /tmp; then
+        mount -o remount,nosuid /tmp
+        sed -i 's|\(/tmp.*tmpfs.*\)|\1,nosuid|' /etc/fstab
+      fi
+    verify: |
+      mount | grep -E '\s/tmp\s' | grep -q nosuid && echo "PASS" || echo "FAIL"
+    rollback: |
+      mount -o remount,suid /tmp 2>/dev/null || true
+    notes: "nosuid prevents setuid bits from working on /tmp"
+
+  - id: FS-013
+    category: "Partition"
+    description: "Ensure noexec option set on /tmp partition"
+    severity: "high"
+    apply: |
+      if mountpoint -q /tmp; then
+        mount -o remount,noexec /tmp
+        sed -i 's|\(/tmp.*tmpfs.*\)|\1,noexec|' /etc/fstab
+      fi
+    verify: |
+      mount | grep -E '\s/tmp\s' | grep -q noexec && echo "PASS" || echo "FAIL"
+    rollback: |
+      mount -o remount,exec /tmp 2>/dev/null || true
+    notes: "noexec prevents execution of binaries on /tmp"
+
+  - id: FS-014
+    category: "Partition"
+    description: "Ensure /dev/shm nodev option is set"
+    severity: "high"
+    apply: |
+      mount -o remount,nodev /dev/shm
+      if ! grep -q "/dev/shm.*nodev" /etc/fstab; then
+        sed -i 's|\(/dev/shm.*tmpfs.*\)|\1,nodev|' /etc/fstab
+      fi
+    verify: |
+      mount | grep /dev/shm | grep -q nodev && echo "PASS" || echo "FAIL"
+    rollback: |
+      mount -o remount,dev /dev/shm 2>/dev/null || true
+    notes: "Shared memory should not allow device files"
+
+  - id: FS-015
+    category: "Partition"
+    description: "Ensure /dev/shm nosuid option is set"
+    severity: "high"
+    apply: |
+      mount -o remount,nosuid /dev/shm
+      if ! grep -q "/dev/shm.*nosuid" /etc/fstab; then
+        sed -i 's|\(/dev/shm.*tmpfs.*\)|\1,nosuid|' /etc/fstab
+      fi
+    verify: |
+      mount | grep /dev/shm | grep -q nosuid && echo "PASS" || echo "FAIL"
+    rollback: |
+      mount -o remount,suid /dev/shm 2>/dev/null || true
+    notes: "Prevents setuid programs in shared memory"
+
+  - id: FS-016
+    category: "Partition"
+    description: "Ensure /dev/shm noexec option is set"
+    severity: "high"
+    apply: |
+      mount -o remount,noexec /dev/shm
+      if ! grep -q "/dev/shm.*noexec" /etc/fstab; then
+        sed -i 's|\(/dev/shm.*tmpfs.*\)|\1,noexec|' /etc/fstab
+      fi
+    verify: |
+      mount | grep /dev/shm | grep -q noexec && echo "PASS" || echo "FAIL"
+    rollback: |
+      mount -o remount,exec /dev/shm 2>/dev/null || true
+    notes: "Prevents execution from shared memory"
+
+  - id: FS-017
+    category: "Partition"
+    description: "Ensure nodev option set on /home partition"
+    severity: "medium"
+    apply: |
+      if mountpoint -q /home; then
+        mount -o remount,nodev /home
+        sed -i 's|\(/home\s.*\)|\1,nodev|' /etc/fstab
+      fi
+    verify: |
+      mountpoint -q /home && mount | grep -E '\s/home\s' | grep -q nodev && echo "PASS" || echo "SKIP"
+    rollback: |
+      mount -o remount,dev /home 2>/dev/null || true
+    notes: "Prevents device files in user home directories"
+
+  - id: FS-018
+    category: "Partition"
+    description: "Ensure nosuid option set on /home partition"
+    severity: "medium"
+    apply: |
+      if mountpoint -q /home; then
+        mount -o remount,nosuid /home
+        sed -i 's|\(/home\s.*\)|\1,nosuid|' /etc/fstab
+      fi
+    verify: |
+      mountpoint -q /home && mount | grep -E '\s/home\s' | grep -q nosuid && echo "PASS" || echo "SKIP"
+    rollback: |
+      mount -o remount,suid /home 2>/dev/null || true
+    notes: "Prevents setuid escalation from user files"
+
+  - id: FS-019
+    category: "Partition"
+    description: "Ensure nodev option set on /var partition"
+    severity: "medium"
+    apply: |
+      if mountpoint -q /var; then
+        mount -o remount,nodev /var
+        sed -i 's|\(/var\s.*\)|\1,nodev|' /etc/fstab
+      fi
+    verify: |
+      mountpoint -q /var && mount | grep -E '\s/var\s' | grep -q nodev && echo "PASS" || echo "SKIP"
+    rollback: |
+      mount -o remount,dev /var 2>/dev/null || true
+    notes: "Prevents device files in /var"
+
+  - id: FS-020
+    category: "Partition"
+    description: "Ensure nosuid option set on /var partition"
+    severity: "medium"
+    apply: |
+      if mountpoint -q /var; then
+        mount -o remount,nosuid /var
+        sed -i 's|\(/var\s.*\)|\1,nosuid|' /etc/fstab
+      fi
+    verify: |
+      mountpoint -q /var && mount | grep -E '\s/var\s' | grep -q nosuid && echo "PASS" || echo "SKIP"
+    rollback: |
+      mount -o remount,suid /var 2>/dev/null || true
+    notes: "Prevents setuid programs in /var"

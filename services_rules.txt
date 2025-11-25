@@ -1,0 +1,451 @@
+---
+# Module 3: Services Hardening
+module_name: "Services Security"
+module_id: "03_services"
+version: "1.0.0"
+
+rules:
+  # Server Services
+  - id: SVC-001
+    category: "Server Service"
+    description: "Ensure autofs services are not in use"
+    severity: "medium"
+    apply: |
+      systemctl stop autofs 2>/dev/null || true
+      systemctl disable autofs 2>/dev/null || true
+      systemctl mask autofs 2>/dev/null || true
+    verify: |
+      if ! systemctl is-enabled autofs 2>/dev/null | grep -q enabled; then
+        echo "PASS"
+      else
+        echo "FAIL"
+      fi
+    rollback: |
+      systemctl unmask autofs 2>/dev/null || true
+    notes: "autofs automatically mounts filesystems when accessed"
+
+  - id: SVC-002
+    category: "Server Service"
+    description: "Ensure avahi daemon services are not in use"
+    severity: "medium"
+    apply: |
+      systemctl stop avahi-daemon.socket avahi-daemon.service 2>/dev/null || true
+      systemctl disable avahi-daemon.socket avahi-daemon.service 2>/dev/null || true
+      systemctl mask avahi-daemon.socket avahi-daemon.service 2>/dev/null || true
+    verify: |
+      if ! systemctl is-enabled avahi-daemon 2>/dev/null | grep -q enabled; then
+        echo "PASS"
+      else
+        echo "FAIL"
+      fi
+    rollback: |
+      systemctl unmask avahi-daemon.socket avahi-daemon.service 2>/dev/null || true
+    notes: "Avahi provides zero-configuration networking, not needed on servers"
+
+  - id: SVC-003
+    category: "Server Service"
+    description: "Ensure dhcp server services are not in use"
+    severity: "high"
+    apply: |
+      systemctl stop isc-dhcp-server isc-dhcp-server6 dhcpd dhcpd6 2>/dev/null || true
+      systemctl disable isc-dhcp-server isc-dhcp-server6 dhcpd dhcpd6 2>/dev/null || true
+      systemctl mask isc-dhcp-server isc-dhcp-server6 dhcpd dhcpd6 2>/dev/null || true
+    verify: |
+      if ! systemctl is-enabled isc-dhcp-server 2>/dev/null | grep -q enabled; then
+        echo "PASS"
+      else
+        echo "FAIL"
+      fi
+    rollback: |
+      systemctl unmask isc-dhcp-server 2>/dev/null || true
+    notes: "DHCP server not needed unless acting as network infrastructure"
+
+  - id: SVC-004
+    category: "Server Service"
+    description: "Ensure dns server services are not in use"
+    severity: "high"
+    apply: |
+      systemctl stop named bind9 2>/dev/null || true
+      systemctl disable named bind9 2>/dev/null || true
+      systemctl mask named bind9 2>/dev/null || true
+    verify: |
+      if ! systemctl is-enabled named 2>/dev/null | grep -q enabled; then
+        echo "PASS"
+      else
+        echo "FAIL"
+      fi
+    rollback: |
+      systemctl unmask named bind9 2>/dev/null || true
+    notes: "DNS server not needed unless designated DNS infrastructure"
+
+  - id: SVC-005
+    category: "Server Service"
+    description: "Ensure dnsmasq services are not in use"
+    severity: "medium"
+    apply: |
+      systemctl stop dnsmasq 2>/dev/null || true
+      systemctl disable dnsmasq 2>/dev/null || true
+      systemctl mask dnsmasq 2>/dev/null || true
+    verify: |
+      if ! systemctl is-enabled dnsmasq 2>/dev/null | grep -q enabled; then
+        echo "PASS"
+      else
+        echo "FAIL"
+      fi
+    rollback: |
+      systemctl unmask dnsmasq 2>/dev/null || true
+    notes: "dnsmasq provides DNS/DHCP services"
+
+  - id: SVC-006
+    category: "Server Service"
+    description: "Ensure ftp server services are not in use"
+    severity: "high"
+    apply: |
+      systemctl stop vsftpd proftpd 2>/dev/null || true
+      systemctl disable vsftpd proftpd 2>/dev/null || true
+      systemctl mask vsftpd proftpd 2>/dev/null || true
+    verify: |
+      if ! systemctl is-enabled vsftpd 2>/dev/null | grep -q enabled; then
+        echo "PASS"
+      else
+        echo "FAIL"
+      fi
+    rollback: |
+      systemctl unmask vsftpd proftpd 2>/dev/null || true
+    notes: "FTP is insecure, use SFTP instead"
+
+  - id: SVC-007
+    category: "Server Service"
+    description: "Ensure ldap server services are not in use"
+    severity: "medium"
+    apply: |
+      systemctl stop slapd 2>/dev/null || true
+      systemctl disable slapd 2>/dev/null || true
+      systemctl mask slapd 2>/dev/null || true
+    verify: |
+      if ! systemctl is-enabled slapd 2>/dev/null | grep -q enabled; then
+        echo "PASS"
+      else
+        echo "FAIL"
+      fi
+    rollback: |
+      systemctl unmask slapd 2>/dev/null || true
+    notes: "LDAP server not needed unless directory service"
+
+  - id: SVC-008
+    category: "Server Service"
+    description: "Ensure NFS services are not in use"
+    severity: "medium"
+    apply: |
+      systemctl stop nfs-server nfs-kernel-server 2>/dev/null || true
+      systemctl disable nfs-server nfs-kernel-server 2>/dev/null || true
+      systemctl mask nfs-server nfs-kernel-server 2>/dev/null || true
+    verify: |
+      if ! systemctl is-enabled nfs-server 2>/dev/null | grep -q enabled; then
+        echo "PASS"
+      else
+        echo "FAIL"
+      fi
+    rollback: |
+      systemctl unmask nfs-server nfs-kernel-server 2>/dev/null || true
+    notes: "Network File System should be disabled if not required"
+
+  - id: SVC-009
+    category: "Server Service"
+    description: "Ensure NIS server services are not in use"
+    severity: "high"
+    apply: |
+      systemctl stop ypserv 2>/dev/null || true
+      systemctl disable ypserv 2>/dev/null || true
+      systemctl mask ypserv 2>/dev/null || true
+    verify: |
+      if ! systemctl is-enabled ypserv 2>/dev/null | grep -q enabled; then
+        echo "PASS"
+      else
+        echo "FAIL"
+      fi
+    rollback: |
+      systemctl unmask ypserv 2>/dev/null || true
+    notes: "NIS is legacy and insecure"
+
+  - id: SVC-010
+    category: "Server Service"
+    description: "Ensure print server services are not in use"
+    severity: "low"
+    apply: |
+      systemctl stop cups 2>/dev/null || true
+      systemctl disable cups 2>/dev/null || true
+      systemctl mask cups 2>/dev/null || true
+    verify: |
+      if ! systemctl is-enabled cups 2>/dev/null | grep -q enabled; then
+        echo "PASS"
+      else
+        echo "FAIL"
+      fi
+    rollback: |
+      systemctl unmask cups 2>/dev/null || true
+    notes: "Print services rarely needed on servers"
+
+  - id: SVC-011
+    category: "Server Service"
+    description: "Ensure rpcbind services are not in use"
+    severity: "medium"
+    apply: |
+      systemctl stop rpcbind rpcbind.socket 2>/dev/null || true
+      systemctl disable rpcbind rpcbind.socket 2>/dev/null || true
+      systemctl mask rpcbind rpcbind.socket 2>/dev/null || true
+    verify: |
+      if ! systemctl is-enabled rpcbind 2>/dev/null | grep -q enabled; then
+        echo "PASS"
+      else
+        echo "FAIL"
+      fi
+    rollback: |
+      systemctl unmask rpcbind rpcbind.socket 2>/dev/null || true
+    notes: "RPC services should be disabled unless required for NFS"
+
+  - id: SVC-012
+    category: "Server Service"
+    description: "Ensure rsync services are not in use"
+    severity: "medium"
+    apply: |
+      systemctl stop rsync 2>/dev/null || true
+      systemctl disable rsync 2>/dev/null || true
+      systemctl mask rsync 2>/dev/null || true
+    verify: |
+      if ! systemctl is-enabled rsync 2>/dev/null | grep -q enabled; then
+        echo "PASS"
+      else
+        echo "FAIL"
+      fi
+    rollback: |
+      systemctl unmask rsync 2>/dev/null || true
+    notes: "rsync daemon not needed if using rsync client only"
+
+  - id: SVC-013
+    category: "Server Service"
+    description: "Ensure samba file server services are not in use"
+    severity: "medium"
+    apply: |
+      systemctl stop smbd nmbd 2>/dev/null || true
+      systemctl disable smbd nmbd 2>/dev/null || true
+      systemctl mask smbd nmbd 2>/dev/null || true
+    verify: |
+      if ! systemctl is-enabled smbd 2>/dev/null | grep -q enabled; then
+        echo "PASS"
+      else
+        echo "FAIL"
+      fi
+    rollback: |
+      systemctl unmask smbd nmbd 2>/dev/null || true
+    notes: "Samba provides Windows file sharing"
+
+  - id: SVC-014
+    category: "Server Service"
+    description: "Ensure snmp services are not in use"
+    severity: "medium"
+    apply: |
+      systemctl stop snmpd 2>/dev/null || true
+      systemctl disable snmpd 2>/dev/null || true
+      systemctl mask snmpd 2>/dev/null || true
+    verify: |
+      if ! systemctl is-enabled snmpd 2>/dev/null | grep -q enabled; then
+        echo "PASS"
+      else
+        echo "FAIL"
+      fi
+    rollback: |
+      systemctl unmask snmpd 2>/dev/null || true
+    notes: "SNMP can expose system information"
+
+  - id: SVC-015
+    category: "Server Service"
+    description: "Ensure web server services are not in use"
+    severity: "medium"
+    apply: |
+      systemctl stop apache2 httpd nginx 2>/dev/null || true
+      systemctl disable apache2 httpd nginx 2>/dev/null || true
+    verify: |
+      if ! systemctl is-enabled apache2 2>/dev/null | grep -q enabled && \
+         ! systemctl is-enabled httpd 2>/dev/null | grep -q enabled && \
+         ! systemctl is-enabled nginx 2>/dev/null | grep -q enabled; then
+        echo "PASS"
+      else
+        echo "FAIL"
+      fi
+    rollback: |
+      echo "Manual re-enable if needed"
+    notes: "Disable if not a web server. This is often needed, review before applying."
+
+  - id: SVC-016
+    category: "Server Service"
+    description: "Ensure X Window server services are not in use"
+    severity: "high"
+    apply: |
+      systemctl set-default multi-user.target 2>/dev/null || true
+    verify: |
+      if systemctl get-default | grep -q multi-user.target; then
+        echo "PASS"
+      else
+        echo "FAIL"
+      fi
+    rollback: |
+      systemctl set-default graphical.target 2>/dev/null || true
+    notes: "GUI not needed on servers"
+
+  # Client Services
+  - id: SVC-017
+    category: "Client Service"
+    description: "Ensure NIS Client is not installed"
+    severity: "high"
+    apply: |
+      apt-get remove -y nis 2>/dev/null || yum remove -y ypbind 2>/dev/null || true
+    verify: |
+      if ! dpkg -l | grep -q '^ii.*nis' && ! rpm -q ypbind &>/dev/null; then
+        echo "PASS"
+      else
+        echo "FAIL"
+      fi
+    rollback: |
+      echo "Manual reinstallation required"
+    notes: "NIS client is legacy and insecure"
+
+  - id: SVC-018
+    category: "Client Service"
+    description: "Ensure rsh client is not installed"
+    severity: "high"
+    apply: |
+      apt-get remove -y rsh-client rsh-redone-client 2>/dev/null || yum remove -y rsh 2>/dev/null || true
+    verify: |
+      if ! dpkg -l | grep -q '^ii.*rsh-client' && ! rpm -q rsh &>/dev/null; then
+        echo "PASS"
+      else
+        echo "FAIL"
+      fi
+    rollback: |
+      echo "Manual reinstallation required"
+    notes: "rsh is insecure, use SSH instead"
+
+  - id: SVC-019
+    category: "Client Service"
+    description: "Ensure talk client is not installed"
+    severity: "medium"
+    apply: |
+      apt-get remove -y talk 2>/dev/null || yum remove -y talk 2>/dev/null || true
+    verify: |
+      if ! dpkg -l | grep -q '^ii.*talk' && ! rpm -q talk &>/dev/null; then
+        echo "PASS"
+      else
+        echo "FAIL"
+      fi
+    rollback: |
+      echo "Manual reinstallation required"
+    notes: "talk is legacy communication tool"
+
+  - id: SVC-020
+    category: "Client Service"
+    description: "Ensure telnet client is not installed"
+    severity: "high"
+    apply: |
+      apt-get remove -y telnet 2>/dev/null || yum remove -y telnet 2>/dev/null || true
+    verify: |
+      if ! dpkg -l | grep -q '^ii.*telnet' && ! rpm -q telnet &>/dev/null; then
+        echo "PASS"
+      else
+        echo "FAIL"
+      fi
+    rollback: |
+      echo "Manual reinstallation required"
+    notes: "telnet is insecure, use SSH instead"
+
+  # Time Synchronization
+  - id: SVC-021
+    category: "Time Sync"
+    description: "Ensure systemd-timesyncd is enabled and running"
+    severity: "high"
+    apply: |
+      systemctl enable systemd-timesyncd.service 2>/dev/null || true
+      systemctl start systemd-timesyncd.service 2>/dev/null || true
+    verify: |
+      if systemctl is-enabled systemd-timesyncd 2>/dev/null | grep -q enabled; then
+        echo "PASS"
+      else
+        echo "SKIP"
+      fi
+    rollback: |
+      systemctl stop systemd-timesyncd.service 2>/dev/null || true
+      systemctl disable systemd-timesyncd.service 2>/dev/null || true
+    notes: "Accurate time is critical for logging and authentication"
+
+  - id: SVC-022
+    category: "Time Sync"
+    description: "Ensure systemd-timesyncd is configured with authorized timeserver"
+    severity: "high"
+    apply: |
+      mkdir -p /etc/systemd/timesyncd.conf.d/
+      cat > /etc/systemd/timesyncd.conf.d/50-timesyncd.conf <<'EOF'
+      [Time]
+      NTP=time.nist.gov time.google.com
+      FallbackNTP=ntp.ubuntu.com pool.ntp.org
+      EOF
+      systemctl restart systemd-timesyncd 2>/dev/null || true
+    verify: |
+      if grep -q "^NTP=" /etc/systemd/timesyncd.conf.d/50-timesyncd.conf 2>/dev/null; then
+        echo "PASS"
+      else
+        echo "SKIP"
+      fi
+    rollback: |
+      rm -f /etc/systemd/timesyncd.conf.d/50-timesyncd.conf
+    notes: "Configure trusted NTP servers"
+
+  # Cron Security
+  - id: SVC-023
+    category: "Job Scheduler"
+    description: "Ensure cron daemon is enabled and active"
+    severity: "high"
+    apply: |
+      systemctl enable cron 2>/dev/null || systemctl enable crond 2>/dev/null || true
+      systemctl start cron 2>/dev/null || systemctl start crond 2>/dev/null || true
+    verify: |
+      if systemctl is-enabled cron 2>/dev/null | grep -q enabled || \
+         systemctl is-enabled crond 2>/dev/null | grep -q enabled; then
+        echo "PASS"
+      else
+        echo "FAIL"
+      fi
+    rollback: |
+      systemctl stop cron crond 2>/dev/null || true
+    notes: "Cron is essential for scheduled tasks"
+
+  - id: SVC-024
+    category: "Job Scheduler"
+    description: "Ensure permissions on /etc/crontab are configured"
+    severity: "medium"
+    apply: |
+      chown root:root /etc/crontab
+      chmod 600 /etc/crontab
+    verify: |
+      stat -c %a /etc/crontab | grep -q "600" && echo "PASS" || echo "FAIL"
+    rollback: |
+      chmod 644 /etc/crontab
+    notes: "Restrict crontab to root only"
+
+  - id: SVC-025
+    category: "Job Scheduler"
+    description: "Ensure crontab is restricted to authorized users"
+    severity: "high"
+    apply: |
+      rm -f /etc/cron.deny
+      touch /etc/cron.allow
+      chmod 600 /etc/cron.allow
+      chown root:root /etc/cron.allow
+    verify: |
+      if [ -f /etc/cron.allow ] && [ ! -f /etc/cron.deny ]; then
+        echo "PASS"
+      else
+        echo "FAIL"
+      fi
+    rollback: |
+      rm -f /etc/cron.allow
+    notes: "Only users in cron.allow can use cron"

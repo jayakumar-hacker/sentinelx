@@ -1,0 +1,346 @@
+---
+# Module 6: Access Control - SSH, Privilege Escalation, PAM
+module_name: "Access Control Security"
+module_id: "06_access_control"
+version: "1.0.0"
+
+rules:
+  # SSH Server Configuration
+  - id: AC-001
+    category: "SSH"
+    description: "Ensure permissions on /etc/ssh/sshd_config are configured"
+    severity: "high"
+    apply: |
+      chown root:root /etc/ssh/sshd_config
+      chmod 600 /etc/ssh/sshd_config
+    verify: |
+      stat -c %a /etc/ssh/sshd_config | grep -q "600" && echo "PASS" || echo "FAIL"
+    rollback: |
+      chmod 644 /etc/ssh/sshd_config
+    notes: "Restrict SSH config to root only"
+
+  - id: AC-002
+    category: "SSH"
+    description: "Ensure SSH PermitRootLogin is disabled"
+    severity: "critical"
+    apply: |
+      sed -i 's/^#*PermitRootLogin.*/PermitRootLogin no/' /etc/ssh/sshd_config
+      echo "PermitRootLogin no" >> /etc/ssh/sshd_config
+      systemctl reload sshd || systemctl reload ssh
+    verify: |
+      sshd -T 2>/dev/null | grep -i "^permitrootlogin" | grep -q "no" && echo "PASS" || echo "FAIL"
+    rollback: |
+      sed -i 's/^PermitRootLogin.*/PermitRootLogin yes/' /etc/ssh/sshd_config
+      systemctl reload sshd || systemctl reload ssh
+    notes: "Prevent direct root login via SSH"
+
+  - id: AC-003
+    category: "SSH"
+    description: "Ensure SSH PermitEmptyPasswords is disabled"
+    severity: "critical"
+    apply: |
+      sed -i 's/^#*PermitEmptyPasswords.*/PermitEmptyPasswords no/' /etc/ssh/sshd_config
+      systemctl reload sshd || systemctl reload ssh
+    verify: |
+      sshd -T 2>/dev/null | grep -i "^permitemptypasswords" | grep -q "no" && echo "PASS" || echo "FAIL"
+    rollback: |
+      sed -i 's/^PermitEmptyPasswords.*/PermitEmptyPasswords yes/' /etc/ssh/sshd_config
+    notes: "Never allow empty passwords"
+
+  - id: AC-004
+    category: "SSH"
+    description: "Ensure SSH Protocol is set to 2"
+    severity: "high"
+    apply: |
+      sed -i 's/^#*Protocol.*/Protocol 2/' /etc/ssh/sshd_config
+      systemctl reload sshd || systemctl reload ssh
+    verify: |
+      if grep -q "^Protocol" /etc/ssh/sshd_config; then
+        grep "^Protocol" /etc/ssh/sshd_config | grep -q "2" && echo "PASS" || echo "FAIL"
+      else
+        echo "PASS"
+      fi
+    rollback: |
+      sed -i '/^Protocol/d' /etc/ssh/sshd_config
+    notes: "SSH Protocol 2 is more secure than Protocol 1"
+
+  - id: AC-005
+    category: "SSH"
+    description: "Ensure SSH LogLevel is appropriate"
+    severity: "medium"
+    apply: |
+      sed -i 's/^#*LogLevel.*/LogLevel VERBOSE/' /etc/ssh/sshd_config
+      systemctl reload sshd || systemctl reload ssh
+    verify: |
+      sshd -T 2>/dev/null | grep -i "^loglevel" | grep -qE "VERBOSE|INFO" && echo "PASS" || echo "FAIL"
+    rollback: |
+      sed -i 's/^LogLevel.*/LogLevel INFO/' /etc/ssh/sshd_config
+    notes: "VERBOSE provides better audit information"
+
+  - id: AC-006
+    category: "SSH"
+    description: "Ensure SSH X11 forwarding is disabled"
+    severity: "medium"
+    apply: |
+      sed -i 's/^#*X11Forwarding.*/X11Forwarding no/' /etc/ssh/sshd_config
+      systemctl reload sshd || systemctl reload ssh
+    verify: |
+      sshd -T 2>/dev/null | grep -i "^x11forwarding" | grep -q "no" && echo "PASS" || echo "FAIL"
+    rollback: |
+      sed -i 's/^X11Forwarding.*/X11Forwarding yes/' /etc/ssh/sshd_config
+    notes: "X11 forwarding rarely needed on servers"
+
+  - id: AC-007
+    category: "SSH"
+    description: "Ensure SSH MaxAuthTries is configured"
+    severity: "medium"
+    apply: |
+      sed -i 's/^#*MaxAuthTries.*/MaxAuthTries 4/' /etc/ssh/sshd_config
+      systemctl reload sshd || systemctl reload ssh
+    verify: |
+      sshd -T 2>/dev/null | grep -i "^maxauthtries" | awk '{print $2}' | grep -qE '^[1-4]$' && echo "PASS" || echo "FAIL"
+    rollback: |
+      sed -i 's/^MaxAuthTries.*/MaxAuthTries 6/' /etc/ssh/sshd_config
+    notes: "Limit authentication attempts to prevent brute force"
+
+  - id: AC-008
+    category: "SSH"
+    description: "Ensure SSH IgnoreRhosts is enabled"
+    severity: "high"
+    apply: |
+      sed -i 's/^#*IgnoreRhosts.*/IgnoreRhosts yes/' /etc/ssh/sshd_config
+      systemctl reload sshd || systemctl reload ssh
+    verify: |
+      sshd -T 2>/dev/null | grep -i "^ignorerhosts" | grep -q "yes" && echo "PASS" || echo "FAIL"
+    rollback: |
+      sed -i 's/^IgnoreRhosts.*/IgnoreRhosts no/' /etc/ssh/sshd_config
+    notes: "Rhosts authentication is insecure"
+
+  - id: AC-009
+    category: "SSH"
+    description: "Ensure SSH HostbasedAuthentication is disabled"
+    severity: "high"
+    apply: |
+      sed -i 's/^#*HostbasedAuthentication.*/HostbasedAuthentication no/' /etc/ssh/sshd_config
+      systemctl reload sshd || systemctl reload ssh
+    verify: |
+      sshd -T 2>/dev/null | grep -i "^hostbasedauthentication" | grep -q "no" && echo "PASS" || echo "FAIL"
+    rollback: |
+      sed -i 's/^HostbasedAuthentication.*/HostbasedAuthentication yes/' /etc/ssh/sshd_config
+    notes: "Host-based authentication is less secure"
+
+  - id: AC-010
+    category: "SSH"
+    description: "Ensure SSH ClientAliveInterval and ClientAliveCountMax are configured"
+    severity: "medium"
+    apply: |
+      sed -i 's/^#*ClientAliveInterval.*/ClientAliveInterval 300/' /etc/ssh/sshd_config
+      sed -i 's/^#*ClientAliveCountMax.*/ClientAliveCountMax 3/' /etc/ssh/sshd_config
+      systemctl reload sshd || systemctl reload ssh
+    verify: |
+      interval=$(sshd -T 2>/dev/null | grep -i "^clientaliveinterval" | awk '{print $2}')
+      if [ "$interval" -le 300 ] && [ "$interval" -gt 0 ]; then
+        echo "PASS"
+      else
+        echo "FAIL"
+      fi
+    rollback: |
+      sed -i '/^ClientAliveInterval/d' /etc/ssh/sshd_config
+      sed -i '/^ClientAliveCountMax/d' /etc/ssh/sshd_config
+    notes: "Automatically terminate inactive sessions"
+
+  - id: AC-011
+    category: "SSH"
+    description: "Ensure SSH LoginGraceTime is configured"
+    severity: "medium"
+    apply: |
+      sed -i 's/^#*LoginGraceTime.*/LoginGraceTime 60/' /etc/ssh/sshd_config
+      systemctl reload sshd || systemctl reload ssh
+    verify: |
+      sshd -T 2>/dev/null | grep -i "^logingracetime" | awk '{print $2}' | grep -qE '^[1-9][0-9]?$|^60$' && echo "PASS" || echo "FAIL"
+    rollback: |
+      sed -i 's/^LoginGraceTime.*/LoginGraceTime 120/' /etc/ssh/sshd_config
+    notes: "Limit time for authentication"
+
+  - id: AC-012
+    category: "SSH"
+    description: "Ensure SSH Banner is configured"
+    severity: "medium"
+    apply: |
+      sed -i 's|^#*Banner.*|Banner /etc/issue.net|' /etc/ssh/sshd_config
+      systemctl reload sshd || systemctl reload ssh
+    verify: |
+      sshd -T 2>/dev/null | grep -i "^banner" | grep -q "/etc/issue.net" && echo "PASS" || echo "FAIL"
+    rollback: |
+      sed -i 's|^Banner.*|#Banner none|' /etc/ssh/sshd_config
+    notes: "Display legal warning on SSH login"
+
+  - id: AC-013
+    category: "SSH"
+    description: "Ensure SSH PAM is enabled"
+    severity: "high"
+    apply: |
+      sed -i 's/^#*UsePAM.*/UsePAM yes/' /etc/ssh/sshd_config
+      systemctl reload sshd || systemctl reload ssh
+    verify: |
+      sshd -T 2>/dev/null | grep -i "^usepam" | grep -q "yes" && echo "PASS" || echo "FAIL"
+    rollback: |
+      sed -i 's/^UsePAM.*/UsePAM no/' /etc/ssh/sshd_config
+    notes: "Enable PAM for advanced authentication"
+
+  - id: AC-014
+    category: "SSH"
+    description: "Ensure SSH strong ciphers are configured"
+    severity: "high"
+    apply: |
+      cat >> /etc/ssh/sshd_config <<'EOF'
+      Ciphers chacha20-poly1305@openssh.com,aes256-gcm@openssh.com,aes128-gcm@openssh.com,aes256-ctr,aes192-ctr,aes128-ctr
+      EOF
+      systemctl reload sshd || systemctl reload ssh
+    verify: |
+      if sshd -T 2>/dev/null | grep -i "^ciphers" | grep -q "aes256-gcm"; then
+        echo "PASS"
+      else
+        echo "FAIL"
+      fi
+    rollback: |
+      sed -i '/^Ciphers/d' /etc/ssh/sshd_config
+    notes: "Use only strong encryption ciphers"
+
+  # Sudo Configuration
+  - id: AC-015
+    category: "Sudo"
+    description: "Ensure sudo is installed"
+    severity: "critical"
+    apply: |
+      if ! command -v sudo &>/dev/null; then
+        apt-get install -y sudo 2>/dev/null || yum install -y sudo 2>/dev/null || true
+      fi
+    verify: |
+      command -v sudo &>/dev/null && echo "PASS" || echo "FAIL"
+    rollback: |
+      echo "Do not remove sudo"
+    notes: "sudo is essential for privilege escalation"
+
+  - id: AC-016
+    category: "Sudo"
+    description: "Ensure sudo commands use pty"
+    severity: "high"
+    apply: |
+      echo "Defaults use_pty" >> /etc/sudoers.d/99-hardening
+      chmod 440 /etc/sudoers.d/99-hardening
+    verify: |
+      grep -q "use_pty" /etc/sudoers.d/99-hardening && echo "PASS" || echo "FAIL"
+    rollback: |
+      rm -f /etc/sudoers.d/99-hardening
+    notes: "Prevents sudo session hijacking"
+
+  - id: AC-017
+    category: "Sudo"
+    description: "Ensure sudo log file exists"
+    severity: "medium"
+    apply: |
+      echo "Defaults logfile=\"/var/log/sudo.log\"" >> /etc/sudoers.d/99-hardening
+      touch /var/log/sudo.log
+      chmod 640 /var/log/sudo.log
+    verify: |
+      grep -q "logfile" /etc/sudoers.d/99-hardening && echo "PASS" || echo "FAIL"
+    rollback: |
+      sed -i '/logfile/d' /etc/sudoers.d/99-hardening
+    notes: "Log all sudo commands for auditing"
+
+  - id: AC-018
+    category: "Sudo"
+    description: "Ensure users must provide password for privilege escalation"
+    severity: "high"
+    apply: |
+      sed -i 's/^%sudo.*ALL=(ALL:ALL) ALL/%sudo ALL=(ALL:ALL) ALL/' /etc/sudoers
+      sed -i 's/^%wheel.*ALL=(ALL) ALL/%wheel ALL=(ALL:ALL) ALL/' /etc/sudoers
+    verify: |
+      if ! grep -E "^%sudo.*NOPASSWD|^%wheel.*NOPASSWD" /etc/sudoers; then
+        echo "PASS"
+      else
+        echo "FAIL"
+      fi
+    rollback: |
+      echo "Manual sudoers edit required"
+    notes: "Require password for sudo to prevent unauthorized access"
+
+  - id: AC-019
+    category: "Sudo"
+    description: "Ensure access to su command is restricted"
+    severity: "high"
+    apply: |
+      if ! grep -q "^auth.*required.*pam_wheel.so" /etc/pam.d/su; then
+        echo "auth required pam_wheel.so use_uid" >> /etc/pam.d/su
+      fi
+    verify: |
+      grep -q "^auth.*required.*pam_wheel.so" /etc/pam.d/su && echo "PASS" || echo "FAIL"
+    rollback: |
+      sed -i '/pam_wheel.so/d' /etc/pam.d/su
+    notes: "Restrict su to wheel group members"
+
+  # PAM Configuration
+  - id: AC-020
+    category: "PAM"
+    description: "Ensure password failed attempts lockout is configured"
+    severity: "high"
+    apply: |
+      if [ -f /etc/pam.d/common-auth ]; then
+        if ! grep -q "pam_faillock.so" /etc/pam.d/common-auth; then
+          sed -i '1i auth required pam_faillock.so preauth audit silent deny=5 unlock_time=900' /etc/pam.d/common-auth
+          sed -i '2i auth [default=die] pam_faillock.so authfail audit deny=5 unlock_time=900' /etc/pam.d/common-auth
+        fi
+      fi
+    verify: |
+      if [ -f /etc/pam.d/common-auth ] && grep -q "pam_faillock" /etc/pam.d/common-auth; then
+        echo "PASS"
+      else
+        echo "SKIP"
+      fi
+    rollback: |
+      sed -i '/pam_faillock/d' /etc/pam.d/common-auth 2>/dev/null || true
+    notes: "Lock account after failed login attempts"
+
+  - id: AC-021
+    category: "PAM"
+    description: "Ensure password quality requirements are configured"
+    severity: "high"
+    apply: |
+      apt-get install -y libpam-pwquality 2>/dev/null || yum install -y libpwquality 2>/dev/null || true
+      cat > /etc/security/pwquality.conf <<'EOF'
+      minlen = 14
+      dcredit = -1
+      ucredit = -1
+      ocredit = -1
+      lcredit = -1
+      EOF
+    verify: |
+      if [ -f /etc/security/pwquality.conf ] && grep -q "minlen = 14" /etc/security/pwquality.conf; then
+        echo "PASS"
+      else
+        echo "FAIL"
+      fi
+    rollback: |
+      echo "# Defaults" > /etc/security/pwquality.conf
+    notes: "Enforce strong password complexity"
+
+  - id: AC-022
+    category: "PAM"
+    description: "Ensure password reuse is limited"
+    severity: "high"
+    apply: |
+      if [ -f /etc/pam.d/common-password ]; then
+        if ! grep -q "pam_pwhistory.so" /etc/pam.d/common-password; then
+          echo "password required pam_pwhistory.so remember=5" >> /etc/pam.d/common-password
+        fi
+      fi
+    verify: |
+      if [ -f /etc/pam.d/common-password ] && grep -q "pam_pwhistory.*remember" /etc/pam.d/common-password; then
+        echo "PASS"
+      else
+        echo "SKIP"
+      fi
+    rollback: |
+      sed -i '/pam_pwhistory/d' /etc/pam.d/common-password 2>/dev/null || true
+    notes: "Prevent password reuse"

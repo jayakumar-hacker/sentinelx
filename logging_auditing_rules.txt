@@ -1,0 +1,447 @@
+---
+# Module 8: Logging and Auditing
+module_name: "Logging and Auditing Security"
+module_id: "08_logging_auditing"
+version: "1.0.0"
+
+rules:
+  # Systemd-journald
+  - id: LOG-001
+    category: "Journald"
+    description: "Ensure journald service is enabled and active"
+    severity: "high"
+    apply: |
+      systemctl enable systemd-journald.service
+      systemctl start systemd-journald.service
+    verify: |
+      systemctl is-active systemd-journald.service | grep -q "active" && echo "PASS" || echo "FAIL"
+    rollback: |
+      systemctl stop systemd-journald.service
+    notes: "Journald is primary logging service"
+
+  - id: LOG-002
+    category: "Journald"
+    description: "Ensure journald log file access is configured"
+    severity: "medium"
+    apply: |
+      mkdir -p /var/log/journal
+      chmod 2755 /var/log/journal
+      chown root:systemd-journal /var/log/journal
+    verify: |
+      if [ -d /var/log/journal ]; then
+        perms=$(stat -c %a /var/log/journal)
+        [ "$perms" = "2755" ] && echo "PASS" || echo "FAIL"
+      else
+        echo "SKIP"
+      fi
+    rollback: |
+      chmod 755 /var/log/journal
+    notes: "Secure journal directory permissions"
+
+  - id: LOG-003
+    category: "Journald"
+    description: "Ensure journald log file rotation is configured"
+    severity: "medium"
+    apply: |
+      cat > /etc/systemd/journald.conf.d/99-rotation.conf <<'EOF'
+      [Journal]
+      SystemMaxUse=1G
+      SystemMaxFileSize=100M
+      MaxRetentionSec=1month
+      MaxFileSec=1week
+      EOF
+      systemctl restart systemd-journald
+    verify: |
+      if [ -f /etc/systemd/journald.conf.d/99-rotation.conf ]; then
+        echo "PASS"
+      else
+        echo "FAIL"
+      fi
+    rollback: |
+      rm -f /etc/systemd/journald.conf.d/99-rotation.conf
+      systemctl restart systemd-journald
+    notes: "Prevent journal from consuming excessive disk space"
+
+  # Rsyslog
+  - id: LOG-004
+    category: "Rsyslog"
+    description: "Ensure rsyslog is installed"
+    severity: "high"
+    apply: |
+      apt-get install -y rsyslog 2>/dev/null || yum install -y rsyslog 2>/dev/null || true
+    verify: |
+      command -v rsyslogd &>/dev/null && echo "PASS" || echo "SKIP"
+    rollback: |
+      apt-get remove -y rsyslog 2>/dev/null || yum remove -y rsyslog 2>/dev/null || true
+    notes: "Rsyslog provides advanced logging capabilities"
+
+  - id: LOG-005
+    category: "Rsyslog"
+    description: "Ensure rsyslog service is enabled and active"
+    severity: "high"
+    apply: |
+      systemctl enable rsyslog
+      systemctl start rsyslog
+    verify: |
+      systemctl is-enabled rsyslog 2>/dev/null | grep -q enabled && echo "PASS" || echo "SKIP"
+    rollback: |
+      systemctl stop rsyslog
+      systemctl disable rsyslog
+    notes: "Enable rsyslog for persistent logging"
+
+  - id: LOG-006
+    category: "Rsyslog"
+    description: "Ensure journald is configured to send logs to rsyslog"
+    severity: "medium"
+    apply: |
+      cat > /etc/systemd/journald.conf.d/99-forward-to-syslog.conf <<'EOF'
+      [Journal]
+      ForwardToSyslog=yes
+      EOF
+      systemctl restart systemd-journald
+    verify: |
+      if grep -q "ForwardToSyslog=yes" /etc/systemd/journald.conf.d/99-forward-to-syslog.conf 2>/dev/null; then
+        echo "PASS"
+      else
+        echo "SKIP"
+      fi
+    rollback: |
+      rm -f /etc/systemd/journald.conf.d/99-forward-to-syslog.conf
+      systemctl restart systemd-journald
+    notes: "Centralize logging through rsyslog"
+
+  - id: LOG-007
+    category: "Rsyslog"
+    description: "Ensure rsyslog log file creation mode is configured"
+    severity: "medium"
+    apply: |
+      echo '$FileCreateMode 0640' >> /etc/rsyslog.conf
+      systemctl restart rsyslog
+    verify: |
+      grep -q "^\$FileCreateMode 0640" /etc/rsyslog.conf && echo "PASS" || echo "SKIP"
+    rollback: |
+      sed -i '/^\$FileCreateMode/d' /etc/rsyslog.conf
+      systemctl restart rsyslog
+    notes: "Restrict log file permissions"
+
+  - id: LOG-008
+    category: "Rsyslog"
+    description: "Ensure rsyslog is configured to send logs to remote log host"
+    severity: "medium"
+    apply: |
+      cat >> /etc/rsyslog.conf <<'EOF'
+      # Remote logging - configure with your syslog server
+      # *.* @@logserver.example.com:514
+      EOF
+      systemctl restart rsyslog
+    verify: |
+      echo "SKIP"
+    rollback: |
+      sed -i '/Remote logging/,/@@logserver/d' /etc/rsyslog.conf
+      systemctl restart rsyslog
+    notes: "Configure remote logging server manually"
+
+  - id: LOG-009
+    category: "Rsyslog"
+    description: "Ensure rsyslog is not configured to receive logs from remote clients"
+    severity: "medium"
+    apply: |
+      sed -i 's/^module(load="imtcp")/#module(load="imtcp")/' /etc/rsyslog.conf
+      sed -i 's/^input(type="imtcp"/#input(type="imtcp"/' /etc/rsyslog.conf
+      sed -i 's/^module(load="imudp")/#module(load="imudp")/' /etc/rsyslog.conf
+      sed -i 's/^input(type="imudp"/#input(type="imudp"/' /etc/rsyslog.conf
+      systemctl restart rsyslog
+    verify: |
+      if ! grep -E "^module\(load=\"im(tcp|udp)\"\)" /etc/rsyslog.conf; then
+        echo "PASS"
+      else
+        echo "SKIP"
+      fi
+    rollback: |
+      echo "Manual rsyslog configuration restore"
+    notes: "Servers should not accept remote logs unless designated as log server"
+
+  - id: LOG-010
+    category: "Logrotate"
+    description: "Ensure logrotate is configured"
+    severity: "medium"
+    apply: |
+      cat > /etc/logrotate.d/hardening <<'EOF'
+      /var/log/*.log {
+          weekly
+          rotate 12
+          compress
+          delaycompress
+          missingok
+          notifempty
+          create 0640 root root
+      }
+      EOF
+    verify: |
+      [ -f /etc/logrotate.d/hardening ] && echo "PASS" || echo "FAIL"
+    rollback: |
+      rm -f /etc/logrotate.d/hardening
+    notes: "Automatic log rotation"
+
+  # Auditd
+  - id: LOG-011
+    category: "Auditd"
+    description: "Ensure auditd packages are installed"
+    severity: "high"
+    apply: |
+      apt-get install -y auditd audispd-plugins 2>/dev/null || yum install -y audit audit-libs 2>/dev/null || true
+    verify: |
+      command -v auditd &>/dev/null && echo "PASS" || echo "FAIL"
+    rollback: |
+      apt-get remove -y auditd 2>/dev/null || yum remove -y audit 2>/dev/null || true
+    notes: "Auditd provides detailed system auditing"
+
+  - id: LOG-012
+    category: "Auditd"
+    description: "Ensure auditd service is enabled and active"
+    severity: "high"
+    apply: |
+      systemctl enable auditd
+      systemctl start auditd
+    verify: |
+      systemctl is-enabled auditd 2>/dev/null | grep -q enabled && echo "PASS" || echo "FAIL"
+    rollback: |
+      systemctl stop auditd
+      systemctl disable auditd
+    notes: "Enable system auditing"
+
+  - id: LOG-013
+    category: "Auditd"
+    description: "Ensure auditing for processes that start prior to auditd is enabled"
+    severity: "high"
+    apply: |
+      if [ -f /etc/default/grub ]; then
+        sed -i 's/GRUB_CMDLINE_LINUX="\(.*\)"/GRUB_CMDLINE_LINUX="\1 audit=1"/' /etc/default/grub
+        update-grub 2>/dev/null || grub2-mkconfig -o /boot/grub2/grub.cfg 2>/dev/null || true
+      fi
+    verify: |
+      if grep -q "audit=1" /etc/default/grub 2>/dev/null; then
+        echo "PASS"
+      else
+        echo "FAIL"
+      fi
+    rollback: |
+      sed -i 's/ audit=1//' /etc/default/grub
+      update-grub 2>/dev/null || grub2-mkconfig -o /boot/grub2/grub.cfg 2>/dev/null || true
+    notes: "Audit early boot processes. Requires reboot."
+
+  - id: LOG-014
+    category: "Auditd"
+    description: "Ensure audit log storage size is configured"
+    severity: "medium"
+    apply: |
+      sed -i 's/^max_log_file =.*/max_log_file = 100/' /etc/audit/auditd.conf
+      systemctl restart auditd
+    verify: |
+      grep -q "^max_log_file = 100" /etc/audit/auditd.conf && echo "PASS" || echo "FAIL"
+    rollback: |
+      sed -i 's/^max_log_file =.*/max_log_file = 8/' /etc/audit/auditd.conf
+    notes: "Set maximum audit log file size to 100MB"
+
+  - id: LOG-015
+    category: "Auditd"
+    description: "Ensure audit logs are not automatically deleted"
+    severity: "high"
+    apply: |
+      sed -i 's/^max_log_file_action =.*/max_log_file_action = keep_logs/' /etc/audit/auditd.conf
+      systemctl restart auditd
+    verify: |
+      grep -q "^max_log_file_action = keep_logs" /etc/audit/auditd.conf && echo "PASS" || echo "FAIL"
+    rollback: |
+      sed -i 's/^max_log_file_action =.*/max_log_file_action = rotate/' /etc/audit/auditd.conf
+    notes: "Preserve audit logs"
+
+  - id: LOG-016
+    category: "Auditd"
+    description: "Ensure system is disabled when audit logs are full"
+    severity: "high"
+    apply: |
+      sed -i 's/^space_left_action =.*/space_left_action = email/' /etc/audit/auditd.conf
+      sed -i 's/^admin_space_left_action =.*/admin_space_left_action = halt/' /etc/audit/auditd.conf
+      systemctl restart auditd
+    verify: |
+      grep -q "^admin_space_left_action = halt" /etc/audit/auditd.conf && echo "PASS" || echo "FAIL"
+    rollback: |
+      sed -i 's/^admin_space_left_action =.*/admin_space_left_action = suspend/' /etc/audit/auditd.conf
+    notes: "Halt system if audit logs full to prevent loss"
+
+  # Audit Rules
+  - id: LOG-017
+    category: "Audit Rules"
+    description: "Ensure changes to system administration scope is collected"
+    severity: "high"
+    apply: |
+      cat >> /etc/audit/rules.d/hardening.rules <<'EOF'
+      -w /etc/sudoers -p wa -k scope
+      -w /etc/sudoers.d/ -p wa -k scope
+      EOF
+      augenrules --load 2>/dev/null || service auditd restart
+    verify: |
+      if auditctl -l 2>/dev/null | grep -q "/etc/sudoers"; then
+        echo "PASS"
+      else
+        echo "FAIL"
+      fi
+    rollback: |
+      sed -i '/sudoers/d' /etc/audit/rules.d/hardening.rules
+      augenrules --load 2>/dev/null || true
+    notes: "Monitor sudo configuration changes"
+
+  - id: LOG-018
+    category: "Audit Rules"
+    description: "Ensure events that modify date and time are collected"
+    severity: "high"
+    apply: |
+      cat >> /etc/audit/rules.d/hardening.rules <<'EOF'
+      -a always,exit -F arch=b64 -S adjtimex -S settimeofday -k time-change
+      -a always,exit -F arch=b64 -S clock_settime -k time-change
+      -w /etc/localtime -p wa -k time-change
+      EOF
+      augenrules --load 2>/dev/null || service auditd restart
+    verify: |
+      if auditctl -l 2>/dev/null | grep -q "time-change"; then
+        echo "PASS"
+      else
+        echo "FAIL"
+      fi
+    rollback: |
+      sed -i '/time-change/d' /etc/audit/rules.d/hardening.rules
+    notes: "Monitor system time modifications"
+
+  - id: LOG-019
+    category: "Audit Rules"
+    description: "Ensure events that modify user/group information are collected"
+    severity: "high"
+    apply: |
+      cat >> /etc/audit/rules.d/hardening.rules <<'EOF'
+      -w /etc/group -p wa -k identity
+      -w /etc/passwd -p wa -k identity
+      -w /etc/gshadow -p wa -k identity
+      -w /etc/shadow -p wa -k identity
+      -w /etc/security/opasswd -p wa -k identity
+      EOF
+      augenrules --load 2>/dev/null || service auditd restart
+    verify: |
+      if auditctl -l 2>/dev/null | grep -q "identity"; then
+        echo "PASS"
+      else
+        echo "FAIL"
+      fi
+    rollback: |
+      sed -i '/identity/d' /etc/audit/rules.d/hardening.rules
+    notes: "Monitor user and group modifications"
+
+  - id: LOG-020
+    category: "Audit Rules"
+    description: "Ensure network environment modifications are collected"
+    severity: "high"
+    apply: |
+      cat >> /etc/audit/rules.d/hardening.rules <<'EOF'
+      -a always,exit -F arch=b64 -S sethostname -S setdomainname -k system-locale
+      -w /etc/issue -p wa -k system-locale
+      -w /etc/issue.net -p wa -k system-locale
+      -w /etc/hosts -p wa -k system-locale
+      -w /etc/network -p wa -k system-locale
+      EOF
+      augenrules --load 2>/dev/null || service auditd restart
+    verify: |
+      if auditctl -l 2>/dev/null | grep -q "system-locale"; then
+        echo "PASS"
+      else
+        echo "FAIL"
+      fi
+    rollback: |
+      sed -i '/system-locale/d' /etc/audit/rules.d/hardening.rules
+    notes: "Monitor network configuration changes"
+
+  - id: LOG-021
+    category: "Audit Rules"
+    description: "Ensure login and logout events are collected"
+    severity: "high"
+    apply: |
+      cat >> /etc/audit/rules.d/hardening.rules <<'EOF'
+      -w /var/log/lastlog -p wa -k logins
+      -w /var/run/faillock/ -p wa -k logins
+      EOF
+      augenrules --load 2>/dev/null || service auditd restart
+    verify: |
+      if auditctl -l 2>/dev/null | grep -q "logins"; then
+        echo "PASS"
+      else
+        echo "FAIL"
+      fi
+    rollback: |
+      sed -i '/logins/d' /etc/audit/rules.d/hardening.rules
+    notes: "Monitor authentication events"
+
+  - id: LOG-022
+    category: "Audit Rules"
+    description: "Ensure file deletion events are collected"
+    severity: "medium"
+    apply: |
+      cat >> /etc/audit/rules.d/hardening.rules <<'EOF'
+      -a always,exit -F arch=b64 -S unlink -S unlinkat -S rename -S renameat -F auid>=1000 -F auid!=4294967295 -k delete
+      EOF
+      augenrules --load 2>/dev/null || service auditd restart
+    verify: |
+      if auditctl -l 2>/dev/null | grep -q "delete"; then
+        echo "PASS"
+      else
+        echo "FAIL"
+      fi
+    rollback: |
+      sed -i '/delete/d' /etc/audit/rules.d/hardening.rules
+    notes: "Monitor file deletions"
+
+  - id: LOG-023
+    category: "Audit Rules"
+    description: "Ensure the audit configuration is immutable"
+    severity: "high"
+    apply: |
+      echo "-e 2" >> /etc/audit/rules.d/99-finalize.rules
+      augenrules --load 2>/dev/null || service auditd restart
+    verify: |
+      if grep -q "^-e 2" /etc/audit/rules.d/99-finalize.rules 2>/dev/null; then
+        echo "PASS"
+      else
+        echo "FAIL"
+      fi
+    rollback: |
+      sed -i '/^-e 2/d' /etc/audit/rules.d/99-finalize.rules
+    notes: "Make audit config immutable. Requires reboot to modify."
+
+  # AIDE
+  - id: LOG-024
+    category: "Integrity"
+    description: "Ensure AIDE is installed"
+    severity: "high"
+    apply: |
+      apt-get install -y aide aide-common 2>/dev/null || yum install -y aide 2>/dev/null || true
+      aideinit 2>/dev/null || aide --init 2>/dev/null || true
+      [ -f /var/lib/aide/aide.db.new ] && mv /var/lib/aide/aide.db.new /var/lib/aide/aide.db || true
+    verify: |
+      command -v aide &>/dev/null && echo "PASS" || echo "FAIL"
+    rollback: |
+      apt-get remove -y aide 2>/dev/null || yum remove -y aide 2>/dev/null || true
+    notes: "AIDE monitors file integrity"
+
+  - id: LOG-025
+    category: "Integrity"
+    description: "Ensure filesystem integrity is regularly checked"
+    severity: "high"
+    apply: |
+      cat > /etc/cron.daily/aide <<'EOF'
+      #!/bin/bash
+      /usr/bin/aide --check
+      EOF
+      chmod 755 /etc/cron.daily/aide
+    verify: |
+      [ -f /etc/cron.daily/aide ] && echo "PASS" || echo "FAIL"
+    rollback: |
+      rm -f /etc/cron.daily/aide
+    notes: "Run AIDE checks daily"

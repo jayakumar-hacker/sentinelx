@@ -1,0 +1,253 @@
+---
+# Module 2: Package Management & Bootloader Hardening
+module_name: "Package Management & Bootloader Security"
+module_id: "02_package_management"
+version: "1.0.0"
+
+rules:
+  # Bootloader Security
+  - id: PKG-001
+    category: "Bootloader"
+    description: "Ensure bootloader password is set"
+    severity: "critical"
+    apply: |
+      if command -v grub2-mkpasswd-pbkdf2 &>/dev/null; then
+        GRUB_CFG="/boot/grub2/grub.cfg"
+        GRUB_D="/etc/grub.d"
+      else
+        GRUB_CFG="/boot/grub/grub.cfg"
+        GRUB_D="/etc/grub.d"
+      fi
+      cat > /etc/grub.d/40_password <<'EOF'
+      #!/bin/sh
+      set -e
+      cat << EOFPASS
+      set superusers="root"
+      password_pbkdf2 root grub.pbkdf2.sha512.10000.generated_hash_here
+      EOFPASS
+      EOF
+      chmod 755 /etc/grub.d/40_password
+      update-grub 2>/dev/null || grub2-mkconfig -o "$GRUB_CFG" 2>/dev/null || true
+    verify: |
+      if grep -q "password_pbkdf2" /boot/grub*/grub.cfg 2>/dev/null; then
+        echo "PASS"
+      else
+        echo "FAIL"
+      fi
+    rollback: |
+      rm -f /etc/grub.d/40_password
+      update-grub 2>/dev/null || grub2-mkconfig -o /boot/grub*/grub.cfg 2>/dev/null || true
+    notes: "Prevents unauthorized bootloader modifications. Update with actual password hash."
+
+  - id: PKG-002
+    category: "Bootloader"
+    description: "Ensure access to bootloader config is configured"
+    severity: "critical"
+    apply: |
+      if [ -f /boot/grub/grub.cfg ]; then
+        chown root:root /boot/grub/grub.cfg
+        chmod 600 /boot/grub/grub.cfg
+      fi
+      if [ -f /boot/grub2/grub.cfg ]; then
+        chown root:root /boot/grub2/grub.cfg
+        chmod 600 /boot/grub2/grub.cfg
+      fi
+    verify: |
+      for cfg in /boot/grub/grub.cfg /boot/grub2/grub.cfg; do
+        if [ -f "$cfg" ]; then
+          perms=$(stat -c %a "$cfg")
+          if [ "$perms" = "600" ]; then
+            echo "PASS"
+            exit 0
+          fi
+        fi
+      done
+      echo "FAIL"
+    rollback: |
+      chmod 644 /boot/grub*/grub.cfg 2>/dev/null || true
+    notes: "Restricts bootloader config to root only"
+
+  # Process Hardening
+  - id: PKG-003
+    category: "Process Hardening"
+    description: "Ensure address space layout randomization (ASLR) is enabled"
+    severity: "high"
+    apply: |
+      echo "kernel.randomize_va_space = 2" > /etc/sysctl.d/60-kernel-randomize.conf
+      sysctl -w kernel.randomize_va_space=2
+    verify: |
+      if sysctl kernel.randomize_va_space | grep -q "= 2"; then
+        echo "PASS"
+      else
+        echo "FAIL"
+      fi
+    rollback: |
+      rm -f /etc/sysctl.d/60-kernel-randomize.conf
+      sysctl -w kernel.randomize_va_space=0
+    notes: "ASLR makes buffer overflow attacks more difficult"
+
+  - id: PKG-004
+    category: "Process Hardening"
+    description: "Ensure ptrace_scope is restricted"
+    severity: "high"
+    apply: |
+      echo "kernel.yama.ptrace_scope = 1" > /etc/sysctl.d/60-ptrace.conf
+      sysctl -w kernel.yama.ptrace_scope=1 2>/dev/null || true
+    verify: |
+      if sysctl kernel.yama.ptrace_scope 2>/dev/null | grep -q "= 1"; then
+        echo "PASS"
+      else
+        echo "SKIP"
+      fi
+    rollback: |
+      rm -f /etc/sysctl.d/60-ptrace.conf
+      sysctl -w kernel.yama.ptrace_scope=0 2>/dev/null || true
+    notes: "Restricts ptrace to prevent process debugging by non-root"
+
+  - id: PKG-005
+    category: "Process Hardening"
+    description: "Ensure core dumps are restricted"
+    severity: "high"
+    apply: |
+      echo "* hard core 0" >> /etc/security/limits.conf
+      echo "fs.suid_dumpable = 0" > /etc/sysctl.d/60-coredump.conf
+      sysctl -w fs.suid_dumpable=0
+      systemctl daemon-reload
+    verify: |
+      if sysctl fs.suid_dumpable | grep -q "= 0" && grep -q "hard core 0" /etc/security/limits.conf; then
+        echo "PASS"
+      else
+        echo "FAIL"
+      fi
+    rollback: |
+      sed -i '/hard core 0/d' /etc/security/limits.conf
+      rm -f /etc/sysctl.d/60-coredump.conf
+      sysctl -w fs.suid_dumpable=1
+    notes: "Core dumps may contain sensitive information"
+
+  - id: PKG-006
+    category: "Process Hardening"
+    description: "Ensure prelink is not installed"
+    severity: "medium"
+    apply: |
+      if command -v prelink &>/dev/null; then
+        prelink -ua 2>/dev/null || true
+        apt-get remove -y prelink 2>/dev/null || yum remove -y prelink 2>/dev/null || true
+      fi
+    verify: |
+      if ! command -v prelink &>/dev/null; then
+        echo "PASS"
+      else
+        echo "FAIL"
+      fi
+    rollback: |
+      echo "Manual reinstallation required if needed"
+    notes: "prelink can interfere with AIDE and other security tools"
+
+  - id: PKG-007
+    category: "Process Hardening"
+    description: "Ensure Automatic Error Reporting is not enabled"
+    severity: "medium"
+    apply: |
+      systemctl stop apport.service 2>/dev/null || true
+      systemctl disable apport.service 2>/dev/null || true
+      systemctl mask apport.service 2>/dev/null || true
+    verify: |
+      if ! systemctl is-enabled apport.service 2>/dev/null | grep -q enabled; then
+        echo "PASS"
+      else
+        echo "FAIL"
+      fi
+    rollback: |
+      systemctl unmask apport.service 2>/dev/null || true
+      systemctl enable apport.service 2>/dev/null || true
+    notes: "Automatic error reporting may leak sensitive information"
+
+  # Warning Banners
+  - id: PKG-008
+    category: "Warning Banner"
+    description: "Ensure local login warning banner is configured"
+    severity: "medium"
+    apply: |
+      cat > /etc/issue <<'EOF'
+      **************************************************************************
+      * AUTHORIZED ACCESS ONLY                                                 *
+      * Unauthorized access to this system is forbidden and will be prosecuted *
+      * by law. By accessing this system, you agree that your actions may be   *
+      * monitored and recorded.                                                *
+      **************************************************************************
+      EOF
+      chmod 644 /etc/issue
+    verify: |
+      if [ -f /etc/issue ] && [ -s /etc/issue ]; then
+        echo "PASS"
+      else
+        echo "FAIL"
+      fi
+    rollback: |
+      echo "" > /etc/issue
+    notes: "Legal warning for local login attempts"
+
+  - id: PKG-009
+    category: "Warning Banner"
+    description: "Ensure remote login warning banner is configured"
+    severity: "medium"
+    apply: |
+      cat > /etc/issue.net <<'EOF'
+      **************************************************************************
+      * AUTHORIZED ACCESS ONLY                                                 *
+      * Unauthorized access to this system is forbidden and will be prosecuted *
+      * by law. By accessing this system, you agree that your actions may be   *
+      * monitored and recorded.                                                *
+      **************************************************************************
+      EOF
+      chmod 644 /etc/issue.net
+    verify: |
+      if [ -f /etc/issue.net ] && [ -s /etc/issue.net ]; then
+        echo "PASS"
+      else
+        echo "FAIL"
+      fi
+    rollback: |
+      echo "" > /etc/issue.net
+    notes: "Legal warning for remote login attempts"
+
+  - id: PKG-010
+    category: "Warning Banner"
+    description: "Ensure access to /etc/motd is configured"
+    severity: "low"
+    apply: |
+      touch /etc/motd
+      chown root:root /etc/motd
+      chmod 644 /etc/motd
+    verify: |
+      stat -c %a /etc/motd | grep -q "644" && echo "PASS" || echo "FAIL"
+    rollback: |
+      chmod 644 /etc/motd
+    notes: "Message of the day permissions"
+
+  - id: PKG-011
+    category: "Warning Banner"
+    description: "Ensure access to /etc/issue is configured"
+    severity: "medium"
+    apply: |
+      chown root:root /etc/issue
+      chmod 644 /etc/issue
+    verify: |
+      stat -c %a /etc/issue | grep -q "644" && echo "PASS" || echo "FAIL"
+    rollback: |
+      chmod 644 /etc/issue
+    notes: "Local login banner permissions"
+
+  - id: PKG-012
+    category: "Warning Banner"
+    description: "Ensure access to /etc/issue.net is configured"
+    severity: "medium"
+    apply: |
+      chown root:root /etc/issue.net
+      chmod 644 /etc/issue.net
+    verify: |
+      stat -c %a /etc/issue.net | grep -q "644" && echo "PASS" || echo "FAIL"
+    rollback: |
+      chmod 644 /etc/issue.net
+    notes: "Remote login banner permissions"

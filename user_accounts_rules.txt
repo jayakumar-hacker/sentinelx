@@ -1,0 +1,380 @@
+---
+# Module 7: User Accounts and Environment
+module_name: "User Accounts and Environment Security"
+module_id: "07_user_accounts"
+version: "1.0.0"
+
+rules:
+  # Shadow Password Suite
+  - id: UA-001
+    category: "Password Policy"
+    description: "Ensure password expiration is configured"
+    severity: "high"
+    apply: |
+      sed -i 's/^PASS_MAX_DAYS.*/PASS_MAX_DAYS   90/' /etc/login.defs
+      for user in $(awk -F: '($3>=1000)&&($1!="nobody"){print $1}' /etc/passwd); do
+        chage --maxdays 90 "$user" 2>/dev/null || true
+      done
+    verify: |
+      if grep "^PASS_MAX_DAYS" /etc/login.defs | awk '{print $2}' | grep -qE '^[1-9][0-9]?$|^90$'; then
+        echo "PASS"
+      else
+        echo "FAIL"
+      fi
+    rollback: |
+      sed -i 's/^PASS_MAX_DAYS.*/PASS_MAX_DAYS   99999/' /etc/login.defs
+    notes: "Passwords expire after 90 days"
+
+  - id: UA-002
+    category: "Password Policy"
+    description: "Ensure minimum password days is configured"
+    severity: "medium"
+    apply: |
+      sed -i 's/^PASS_MIN_DAYS.*/PASS_MIN_DAYS   1/' /etc/login.defs
+      for user in $(awk -F: '($3>=1000)&&($1!="nobody"){print $1}' /etc/passwd); do
+        chage --mindays 1 "$user" 2>/dev/null || true
+      done
+    verify: |
+      if grep "^PASS_MIN_DAYS" /etc/login.defs | awk '{print $2}' | grep -q "1"; then
+        echo "PASS"
+      else
+        echo "FAIL"
+      fi
+    rollback: |
+      sed -i 's/^PASS_MIN_DAYS.*/PASS_MIN_DAYS   0/' /etc/login.defs
+    notes: "Users cannot change password too frequently"
+
+  - id: UA-003
+    category: "Password Policy"
+    description: "Ensure password expiration warning days is configured"
+    severity: "medium"
+    apply: |
+      sed -i 's/^PASS_WARN_AGE.*/PASS_WARN_AGE   7/' /etc/login.defs
+      for user in $(awk -F: '($3>=1000)&&($1!="nobody"){print $1}' /etc/passwd); do
+        chage --warndays 7 "$user" 2>/dev/null || true
+      done
+    verify: |
+      if grep "^PASS_WARN_AGE" /etc/login.defs | awk '{print $2}' | grep -q "7"; then
+        echo "PASS"
+      else
+        echo "FAIL"
+      fi
+    rollback: |
+      sed -i 's/^PASS_WARN_AGE.*/PASS_WARN_AGE   0/' /etc/login.defs
+    notes: "Warn users 7 days before password expiration"
+
+  - id: UA-004
+    category: "Password Policy"
+    description: "Ensure strong password hashing algorithm is configured"
+    severity: "high"
+    apply: |
+      sed -i 's/^ENCRYPT_METHOD.*/ENCRYPT_METHOD SHA512/' /etc/login.defs
+    verify: |
+      grep "^ENCRYPT_METHOD" /etc/login.defs | grep -q "SHA512" && echo "PASS" || echo "FAIL"
+    rollback: |
+      sed -i 's/^ENCRYPT_METHOD.*/ENCRYPT_METHOD DES/' /etc/login.defs
+    notes: "Use SHA512 for password hashing"
+
+  - id: UA-005
+    category: "Password Policy"
+    description: "Ensure inactive password lock is configured"
+    severity: "high"
+    apply: |
+      useradd -D -f 30
+      for user in $(awk -F: '($3>=1000)&&($1!="nobody"){print $1}' /etc/passwd); do
+        chage --inactive 30 "$user" 2>/dev/null || true
+      done
+    verify: |
+      if useradd -D | grep "^INACTIVE=" | grep -qE "^INACTIVE=[1-9][0-9]?$|^INACTIVE=30$"; then
+        echo "PASS"
+      else
+        echo "FAIL"
+      fi
+    rollback: |
+      useradd -D -f -1
+    notes: "Lock inactive accounts after 30 days"
+
+  # Root and System Accounts
+  - id: UA-006
+    category: "System Account"
+    description: "Ensure root is the only UID 0 account"
+    severity: "critical"
+    apply: |
+      for user in $(awk -F: '($3 == 0 && $1 != "root") {print $1}' /etc/passwd); do
+        echo "WARNING: Non-root user $user has UID 0. Manual intervention required."
+      done
+    verify: |
+      uid0_count=$(awk -F: '($3 == 0) {print $1}' /etc/passwd | wc -l)
+      if [ "$uid0_count" -eq 1 ]; then
+        echo "PASS"
+      else
+        echo "FAIL"
+      fi
+    rollback: |
+      echo "Manual intervention required"
+    notes: "Only root should have UID 0"
+
+  - id: UA-007
+    category: "System Account"
+    description: "Ensure root is the only GID 0 account"
+    severity: "high"
+    apply: |
+      for user in $(awk -F: '($4 == 0 && $1 != "root") {print $1}' /etc/passwd); do
+        echo "WARNING: User $user has GID 0. Manual intervention required."
+      done
+    verify: |
+      gid0_count=$(awk -F: '($4 == 0) {print $1}' /etc/passwd | wc -l)
+      if [ "$gid0_count" -eq 1 ]; then
+        echo "PASS"
+      else
+        echo "FAIL"
+      fi
+    rollback: |
+      echo "Manual intervention required"
+    notes: "Only root should be in group 0"
+
+  - id: UA-008
+    category: "System Account"
+    description: "Ensure root path integrity"
+    severity: "high"
+    apply: |
+      cat > /root/.bashrc.d/path_check.sh <<'EOF'
+      if echo "$PATH" | grep -q "::"; then
+        echo "WARNING: Empty directory in PATH (::)"
+      fi
+      if echo "$PATH" | grep -q ":$"; then
+        echo "WARNING: Trailing : in PATH"
+      fi
+      if echo "$PATH" | grep -q "^:"; then
+        echo "WARNING: Leading : in PATH"
+      fi
+      EOF
+      mkdir -p /root/.bashrc.d
+    verify: |
+      if [ -f /root/.bashrc.d/path_check.sh ]; then
+        echo "PASS"
+      else
+        echo "FAIL"
+      fi
+    rollback: |
+      rm -f /root/.bashrc.d/path_check.sh
+    notes: "Check root PATH for security issues"
+
+  - id: UA-009
+    category: "System Account"
+    description: "Ensure root user umask is configured"
+    severity: "medium"
+    apply: |
+      echo "umask 027" >> /root/.bashrc
+      echo "umask 027" >> /root/.profile
+    verify: |
+      if grep -q "umask 027" /root/.bashrc; then
+        echo "PASS"
+      else
+        echo "FAIL"
+      fi
+    rollback: |
+      sed -i '/umask 027/d' /root/.bashrc /root/.profile
+    notes: "Restrictive umask for root"
+
+  - id: UA-010
+    category: "System Account"
+    description: "Ensure system accounts do not have a valid login shell"
+    severity: "high"
+    apply: |
+      for user in $(awk -F: '($3 < 1000 && $1 != "root") {print $1}' /etc/passwd); do
+        if [ "$user" != "sync" ] && [ "$user" != "shutdown" ] && [ "$user" != "halt" ]; then
+          usermod -s /usr/sbin/nologin "$user" 2>/dev/null || usermod -s /sbin/nologin "$user" 2>/dev/null || true
+        fi
+      done
+    verify: |
+      invalid_shells=$(awk -F: '($3 < 1000 && $1 != "root" && $7 !~ /nologin|false/) {print $1}' /etc/passwd | wc -l)
+      if [ "$invalid_shells" -le 3 ]; then
+        echo "PASS"
+      else
+        echo "FAIL"
+      fi
+    rollback: |
+      echo "Manual shell restoration required"
+    notes: "System accounts should not be able to login"
+
+  # User Default Environment
+  - id: UA-011
+    category: "User Environment"
+    description: "Ensure default user shell timeout is configured"
+    severity: "medium"
+    apply: |
+      cat >> /etc/profile.d/timeout.sh <<'EOF'
+      TMOUT=900
+      readonly TMOUT
+      export TMOUT
+      EOF
+      chmod 644 /etc/profile.d/timeout.sh
+    verify: |
+      if [ -f /etc/profile.d/timeout.sh ] && grep -q "TMOUT=900" /etc/profile.d/timeout.sh; then
+        echo "PASS"
+      else
+        echo "FAIL"
+      fi
+    rollback: |
+      rm -f /etc/profile.d/timeout.sh
+    notes: "Automatically logout idle sessions after 15 minutes"
+
+  - id: UA-012
+    category: "User Environment"
+    description: "Ensure default user umask is configured"
+    severity: "medium"
+    apply: |
+      sed -i 's/^UMASK.*/UMASK           027/' /etc/login.defs
+      cat > /etc/profile.d/umask.sh <<'EOF'
+      umask 027
+      EOF
+      chmod 644 /etc/profile.d/umask.sh
+    verify: |
+      if grep "^UMASK" /etc/login.defs | grep -q "027"; then
+        echo "PASS"
+      else
+        echo "FAIL"
+      fi
+    rollback: |
+      sed -i 's/^UMASK.*/UMASK           022/' /etc/login.defs
+      rm -f /etc/profile.d/umask.sh
+    notes: "More restrictive default file permissions"
+
+  - id: UA-013
+    category: "User Environment"
+    description: "Ensure nologin is not listed in /etc/shells"
+    severity: "low"
+    apply: |
+      sed -i '/nologin/d' /etc/shells
+    verify: |
+      if ! grep -q "nologin" /etc/shells; then
+        echo "PASS"
+      else
+        echo "FAIL"
+      fi
+    rollback: |
+      echo "/usr/sbin/nologin" >> /etc/shells
+      echo "/sbin/nologin" >> /etc/shells
+    notes: "nologin should not be a valid shell"
+
+  - id: UA-014
+    category: "User Validation"
+    description: "Ensure no duplicate UIDs exist"
+    severity: "high"
+    apply: |
+      duplicates=$(cut -f3 -d":" /etc/passwd | sort -n | uniq -c | awk '$1 > 1 {print $2}')
+      if [ -n "$duplicates" ]; then
+        echo "WARNING: Duplicate UIDs found: $duplicates. Manual intervention required."
+      fi
+    verify: |
+      cut -f3 -d":" /etc/passwd | sort -n | uniq -c | awk '$1 > 1 {exit 1}' && echo "PASS" || echo "FAIL"
+    rollback: |
+      echo "No automated rollback - verification only"
+    notes: "Each user should have unique UID"
+
+  - id: UA-015
+    category: "User Validation"
+    description: "Ensure no duplicate GIDs exist"
+    severity: "high"
+    apply: |
+      duplicates=$(cut -f3 -d":" /etc/group | sort -n | uniq -c | awk '$1 > 1 {print $2}')
+      if [ -n "$duplicates" ]; then
+        echo "WARNING: Duplicate GIDs found: $duplicates. Manual intervention required."
+      fi
+    verify: |
+      cut -f3 -d":" /etc/group | sort -n | uniq -c | awk '$1 > 1 {exit 1}' && echo "PASS" || echo "FAIL"
+    rollback: |
+      echo "No automated rollback - verification only"
+    notes: "Each group should have unique GID"
+
+  - id: UA-016
+    category: "User Validation"
+    description: "Ensure no duplicate user names exist"
+    severity: "high"
+    apply: |
+      duplicates=$(cut -f1 -d":" /etc/passwd | sort | uniq -c | awk '$1 > 1 {print $2}')
+      if [ -n "$duplicates" ]; then
+        echo "WARNING: Duplicate usernames found: $duplicates. Manual intervention required."
+      fi
+    verify: |
+      cut -f1 -d":" /etc/passwd | sort | uniq -c | awk '$1 > 1 {exit 1}' && echo "PASS" || echo "FAIL"
+    rollback: |
+      echo "No automated rollback - verification only"
+    notes: "Each username should be unique"
+
+  - id: UA-017
+    category: "User Validation"
+    description: "Ensure no duplicate group names exist"
+    severity: "medium"
+    apply: |
+      duplicates=$(cut -f1 -d":" /etc/group | sort | uniq -c | awk '$1 > 1 {print $2}')
+      if [ -n "$duplicates" ]; then
+        echo "WARNING: Duplicate group names found: $duplicates. Manual intervention required."
+      fi
+    verify: |
+      cut -f1 -d":" /etc/group | sort | uniq -c | awk '$1 > 1 {exit 1}' && echo "PASS" || echo "FAIL"
+    rollback: |
+      echo "No automated rollback - verification only"
+    notes: "Each group name should be unique"
+
+  - id: UA-018
+    category: "User Validation"
+    description: "Ensure shadow group is empty"
+    severity: "medium"
+    apply: |
+      if grep "^shadow:" /etc/group | cut -f4 -d: | grep -q "."; then
+        echo "WARNING: Shadow group has members. Manual review required."
+      fi
+    verify: |
+      if ! grep "^shadow:" /etc/group | cut -f4 -d: | grep -q "."; then
+        echo "PASS"
+      else
+        echo "FAIL"
+      fi
+    rollback: |
+      echo "Manual intervention required"
+    notes: "No users should be in shadow group"
+
+  - id: UA-019
+    category: "Home Directory"
+    description: "Ensure local interactive user home directories are configured"
+    severity: "medium"
+    apply: |
+      for user in $(awk -F: '($3>=1000)&&($1!="nobody"){print $1}' /etc/passwd); do
+        home=$(getent passwd "$user" | cut -d: -f6)
+        if [ ! -d "$home" ]; then
+          mkhomedir_helper "$user" 2>/dev/null || mkdir -p "$home"
+          chown "$user":"$(id -gn $user)" "$home"
+          chmod 750 "$home"
+        fi
+      done
+    verify: |
+      missing=0
+      for user in $(awk -F: '($3>=1000)&&($1!="nobody"){print $1}' /etc/passwd); do
+        home=$(getent passwd "$user" | cut -d: -f6)
+        if [ ! -d "$home" ]; then
+          missing=$((missing + 1))
+        fi
+      done
+      [ "$missing" -eq 0 ] && echo "PASS" || echo "FAIL"
+    rollback: |
+      echo "Manual removal of directories if needed"
+    notes: "All users should have home directories"
+
+  - id: UA-020
+    category: "Home Directory"
+    description: "Ensure local interactive user dot files access is configured"
+    severity: "medium"
+    apply: |
+      for user in $(awk -F: '($3>=1000)&&($1!="nobody"){print $1}' /etc/passwd); do
+        home=$(getent passwd "$user" | cut -d: -f6)
+        if [ -d "$home" ]; then
+          find "$home" -maxdepth 1 -name ".*" -type f -exec chmod 600 {} \; 2>/dev/null || true
+        fi
+      done
+    verify: |
+      echo "PASS"
+    rollback: |
+      echo "Manual permission restoration"
+    notes: "Secure user dot files"

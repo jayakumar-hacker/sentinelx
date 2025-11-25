@@ -1,0 +1,250 @@
+---
+# Module 5: Host-Based Firewall
+module_name: "Host-Based Firewall"
+module_id: "05_firewall"
+version: "1.0.0"
+
+rules:
+  - id: FW-001
+    category: "Firewall"
+    description: "Ensure ufw is installed"
+    severity: "high"
+    apply: |
+      if command -v apt-get &>/dev/null; then
+        apt-get update -qq
+        apt-get install -y ufw
+      elif command -v yum &>/dev/null; then
+        yum install -y ufw || echo "UFW not available, consider firewalld"
+      fi
+    verify: |
+      if command -v ufw &>/dev/null; then
+        echo "PASS"
+      else
+        echo "SKIP"
+      fi
+    rollback: |
+      apt-get remove -y ufw 2>/dev/null || yum remove -y ufw 2>/dev/null || true
+    notes: "UFW provides simple firewall management"
+
+  - id: FW-002
+    category: "Firewall"
+    description: "Ensure iptables-persistent is not installed with ufw"
+    severity: "medium"
+    apply: |
+      if command -v ufw &>/dev/null; then
+        apt-get remove -y iptables-persistent 2>/dev/null || true
+      fi
+    verify: |
+      if ! dpkg -l | grep -q '^ii.*iptables-persistent'; then
+        echo "PASS"
+      else
+        echo "SKIP"
+      fi
+    rollback: |
+      echo "Manual reinstall if needed"
+    notes: "Avoid conflicts between ufw and iptables-persistent"
+
+  - id: FW-003
+    category: "Firewall"
+    description: "Ensure ufw service is enabled"
+    severity: "critical"
+    apply: |
+      if command -v ufw &>/dev/null; then
+        systemctl enable ufw.service
+        systemctl start ufw.service
+      fi
+    verify: |
+      if systemctl is-enabled ufw 2>/dev/null | grep -q enabled; then
+        echo "PASS"
+      else
+        echo "SKIP"
+      fi
+    rollback: |
+      systemctl disable ufw.service 2>/dev/null || true
+    notes: "Enable firewall service"
+
+  - id: FW-004
+    category: "Firewall"
+    description: "Ensure ufw loopback traffic is configured"
+    severity: "high"
+    apply: |
+      if command -v ufw &>/dev/null; then
+        ufw allow in on lo
+        ufw allow out on lo
+        ufw deny in from 127.0.0.0/8
+        ufw deny in from ::1
+      fi
+    verify: |
+      if command -v ufw &>/dev/null && ufw status | grep -q "lo.*ALLOW"; then
+        echo "PASS"
+      else
+        echo "SKIP"
+      fi
+    rollback: |
+      ufw delete allow in on lo 2>/dev/null || true
+      ufw delete allow out on lo 2>/dev/null || true
+    notes: "Allow loopback traffic for local services"
+
+  - id: FW-005
+    category: "Firewall"
+    description: "Ensure ufw default deny firewall policy"
+    severity: "critical"
+    apply: |
+      if command -v ufw &>/dev/null; then
+        ufw default deny incoming
+        ufw default deny outgoing
+        ufw default deny routed
+      fi
+    verify: |
+      if command -v ufw &>/dev/null && ufw status verbose | grep -q "deny (incoming)"; then
+        echo "PASS"
+      else
+        echo "SKIP"
+      fi
+    rollback: |
+      ufw default allow incoming 2>/dev/null || true
+      ufw default allow outgoing 2>/dev/null || true
+    notes: "Default deny policy - whitelist approach"
+
+  - id: FW-006
+    category: "Firewall"
+    description: "Ensure ufw allows SSH"
+    severity: "critical"
+    apply: |
+      if command -v ufw &>/dev/null; then
+        ufw allow 22/tcp comment 'SSH access'
+      fi
+    verify: |
+      if command -v ufw &>/dev/null && ufw status | grep -q "22/tcp.*ALLOW"; then
+        echo "PASS"
+      else
+        echo "SKIP"
+      fi
+    rollback: |
+      ufw delete allow 22/tcp 2>/dev/null || true
+    notes: "CRITICAL: Allow SSH before enabling firewall to prevent lockout"
+
+  - id: FW-007
+    category: "Firewall"
+    description: "Ensure ufw allows essential outbound connections"
+    severity: "high"
+    apply: |
+      if command -v ufw &>/dev/null; then
+        ufw allow out 53 comment 'DNS'
+        ufw allow out 123 comment 'NTP'
+        ufw allow out 80 comment 'HTTP'
+        ufw allow out 443 comment 'HTTPS'
+      fi
+    verify: |
+      if command -v ufw &>/dev/null && ufw status | grep -q "80.*ALLOW OUT"; then
+        echo "PASS"
+      else
+        echo "SKIP"
+      fi
+    rollback: |
+      ufw delete allow out 53 2>/dev/null || true
+      ufw delete allow out 123 2>/dev/null || true
+      ufw delete allow out 80 2>/dev/null || true
+      ufw delete allow out 443 2>/dev/null || true
+    notes: "Allow essential services"
+
+  - id: FW-008
+    category: "Firewall"
+    description: "Enable ufw firewall"
+    severity: "critical"
+    apply: |
+      if command -v ufw &>/dev/null; then
+        echo "y" | ufw enable
+      fi
+    verify: |
+      if command -v ufw &>/dev/null && ufw status | grep -q "Status: active"; then
+        echo "PASS"
+      else
+        echo "SKIP"
+      fi
+    rollback: |
+      ufw disable 2>/dev/null || true
+    notes: "CRITICAL: Activates firewall. Ensure SSH is allowed first."
+
+  - id: FW-009
+    category: "Firewall"
+    description: "Configure firewalld as alternative (RedHat/CentOS)"
+    severity: "high"
+    apply: |
+      if command -v firewall-cmd &>/dev/null && ! command -v ufw &>/dev/null; then
+        systemctl enable firewalld
+        systemctl start firewalld
+        firewall-cmd --permanent --add-service=ssh
+        firewall-cmd --permanent --set-default-zone=drop
+        firewall-cmd --reload
+      fi
+    verify: |
+      if command -v firewall-cmd &>/dev/null && firewall-cmd --state 2>/dev/null | grep -q running; then
+        echo "PASS"
+      else
+        echo "SKIP"
+      fi
+    rollback: |
+      systemctl stop firewalld 2>/dev/null || true
+    notes: "Alternative firewall for RedHat-based systems"
+
+  - id: FW-010
+    category: "Firewall"
+    description: "Ensure firewalld allows SSH (RedHat/CentOS)"
+    severity: "critical"
+    apply: |
+      if command -v firewall-cmd &>/dev/null; then
+        firewall-cmd --permanent --add-service=ssh
+        firewall-cmd --reload
+      fi
+    verify: |
+      if command -v firewall-cmd &>/dev/null && firewall-cmd --list-services 2>/dev/null | grep -q ssh; then
+        echo "PASS"
+      else
+        echo "SKIP"
+      fi
+    rollback: |
+      firewall-cmd --permanent --remove-service=ssh 2>/dev/null || true
+      firewall-cmd --reload 2>/dev/null || true
+    notes: "CRITICAL: Ensure SSH access before locking down"
+
+  - id: FW-011
+    category: "Firewall"
+    description: "Configure firewalld drop zone as default"
+    severity: "high"
+    apply: |
+      if command -v firewall-cmd &>/dev/null; then
+        firewall-cmd --permanent --set-default-zone=drop
+        firewall-cmd --reload
+      fi
+    verify: |
+      if command -v firewall-cmd &>/dev/null && firewall-cmd --get-default-zone 2>/dev/null | grep -q drop; then
+        echo "PASS"
+      else
+        echo "SKIP"
+      fi
+    rollback: |
+      firewall-cmd --permanent --set-default-zone=public 2>/dev/null || true
+      firewall-cmd --reload 2>/dev/null || true
+    notes: "Default drop policy for maximum security"
+
+  - id: FW-012
+    category: "Firewall"
+    description: "Verify firewall is active"
+    severity: "critical"
+    apply: |
+      if command -v ufw &>/dev/null; then
+        ufw status
+      elif command -v firewall-cmd &>/dev/null; then
+        firewall-cmd --state
+      fi
+    verify: |
+      if (command -v ufw &>/dev/null && ufw status | grep -q "Status: active") || \
+         (command -v firewall-cmd &>/dev/null && firewall-cmd --state 2>/dev/null | grep -q running); then
+        echo "PASS"
+      else
+        echo "FAIL"
+      fi
+    rollback: |
+      echo "No rollback - verification only"
+    notes: "Final verification that firewall is operational"

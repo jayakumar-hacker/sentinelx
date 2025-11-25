@@ -1,0 +1,331 @@
+---
+# Module 4: Network Hardening
+module_name: "Network Security"
+module_id: "04_network"
+version: "1.0.0"
+
+rules:
+  # Network Devices
+  - id: NET-001
+    category: "Network Device"
+    description: "Ensure wireless interfaces are disabled"
+    severity: "high"
+    apply: |
+      if command -v nmcli &>/dev/null; then
+        nmcli radio all off 2>/dev/null || true
+      fi
+      for iface in $(ls /sys/class/net/ 2>/dev/null | grep -E '^wl'); do
+        ip link set "$iface" down 2>/dev/null || true
+      done
+    verify: |
+      wireless_count=$(ls /sys/class/net/ 2>/dev/null | grep -cE '^wl' || echo 0)
+      if [ "$wireless_count" -eq 0 ]; then
+        echo "PASS"
+      else
+        active_wireless=$(ip link show | grep -cE '^[0-9]+: wl.*state UP' || echo 0)
+        if [ "$active_wireless" -eq 0 ]; then
+          echo "PASS"
+        else
+          echo "FAIL"
+        fi
+      fi
+    rollback: |
+      echo "Manual wireless re-enable if needed"
+    notes: "Wireless not needed on servers"
+
+  - id: NET-002
+    category: "Network Device"
+    description: "Ensure bluetooth services are not in use"
+    severity: "medium"
+    apply: |
+      systemctl stop bluetooth 2>/dev/null || true
+      systemctl disable bluetooth 2>/dev/null || true
+      systemctl mask bluetooth 2>/dev/null || true
+    verify: |
+      if ! systemctl is-enabled bluetooth 2>/dev/null | grep -q enabled; then
+        echo "PASS"
+      else
+        echo "FAIL"
+      fi
+    rollback: |
+      systemctl unmask bluetooth 2>/dev/null || true
+    notes: "Bluetooth rarely needed on servers"
+
+  # Network Kernel Modules
+  - id: NET-003
+    category: "Kernel Module"
+    description: "Ensure dccp kernel module is not available"
+    severity: "medium"
+    apply: |
+      echo "install dccp /bin/true" >> /etc/modprobe.d/dccp.conf
+      rmmod dccp 2>/dev/null || true
+    verify: |
+      modprobe -n -v dccp 2>&1 | grep -q "install /bin/true" && echo "PASS" || echo "FAIL"
+    rollback: |
+      sed -i '/install dccp/d' /etc/modprobe.d/dccp.conf
+    notes: "DCCP is rarely used protocol"
+
+  - id: NET-004
+    category: "Kernel Module"
+    description: "Ensure tipc kernel module is not available"
+    severity: "medium"
+    apply: |
+      echo "install tipc /bin/true" >> /etc/modprobe.d/tipc.conf
+      rmmod tipc 2>/dev/null || true
+    verify: |
+      modprobe -n -v tipc 2>&1 | grep -q "install /bin/true" && echo "PASS" || echo "FAIL"
+    rollback: |
+      sed -i '/install tipc/d' /etc/modprobe.d/tipc.conf
+    notes: "TIPC is cluster communication protocol"
+
+  - id: NET-005
+    category: "Kernel Module"
+    description: "Ensure rds kernel module is not available"
+    severity: "medium"
+    apply: |
+      echo "install rds /bin/true" >> /etc/modprobe.d/rds.conf
+      rmmod rds 2>/dev/null || true
+    verify: |
+      modprobe -n -v rds 2>&1 | grep -q "install /bin/true" && echo "PASS" || echo "FAIL"
+    rollback: |
+      sed -i '/install rds/d' /etc/modprobe.d/rds.conf
+    notes: "RDS is for high-performance networking"
+
+  - id: NET-006
+    category: "Kernel Module"
+    description: "Ensure sctp kernel module is not available"
+    severity: "medium"
+    apply: |
+      echo "install sctp /bin/true" >> /etc/modprobe.d/sctp.conf
+      rmmod sctp 2>/dev/null || true
+    verify: |
+      modprobe -n -v sctp 2>&1 | grep -q "install /bin/true" && echo "PASS" || echo "FAIL"
+    rollback: |
+      sed -i '/install sctp/d' /etc/modprobe.d/sctp.conf
+    notes: "SCTP is alternative to TCP/UDP"
+
+  # Network Kernel Parameters
+  - id: NET-007
+    category: "Kernel Parameter"
+    description: "Ensure IP forwarding is disabled"
+    severity: "high"
+    apply: |
+      cat > /etc/sysctl.d/60-netipv4_sysctl.conf <<'EOF'
+      net.ipv4.ip_forward = 0
+      net.ipv6.conf.all.forwarding = 0
+      EOF
+      sysctl -w net.ipv4.ip_forward=0
+      sysctl -w net.ipv6.conf.all.forwarding=0
+    verify: |
+      if sysctl net.ipv4.ip_forward | grep -q "= 0"; then
+        echo "PASS"
+      else
+        echo "FAIL"
+      fi
+    rollback: |
+      rm -f /etc/sysctl.d/60-netipv4_sysctl.conf
+      sysctl -w net.ipv4.ip_forward=1
+    notes: "Disable unless system is a router"
+
+  - id: NET-008
+    category: "Kernel Parameter"
+    description: "Ensure packet redirect sending is disabled"
+    severity: "high"
+    apply: |
+      cat >> /etc/sysctl.d/60-netipv4_sysctl.conf <<'EOF'
+      net.ipv4.conf.all.send_redirects = 0
+      net.ipv4.conf.default.send_redirects = 0
+      EOF
+      sysctl -w net.ipv4.conf.all.send_redirects=0
+      sysctl -w net.ipv4.conf.default.send_redirects=0
+    verify: |
+      if sysctl net.ipv4.conf.all.send_redirects | grep -q "= 0"; then
+        echo "PASS"
+      else
+        echo "FAIL"
+      fi
+    rollback: |
+      sysctl -w net.ipv4.conf.all.send_redirects=1
+      sysctl -w net.ipv4.conf.default.send_redirects=1
+    notes: "Prevents MITM attacks via ICMP redirects"
+
+  - id: NET-009
+    category: "Kernel Parameter"
+    description: "Ensure bogus ICMP responses are ignored"
+    severity: "medium"
+    apply: |
+      cat >> /etc/sysctl.d/60-netipv4_sysctl.conf <<'EOF'
+      net.ipv4.icmp_ignore_bogus_error_responses = 1
+      EOF
+      sysctl -w net.ipv4.icmp_ignore_bogus_error_responses=1
+    verify: |
+      sysctl net.ipv4.icmp_ignore_bogus_error_responses | grep -q "= 1" && echo "PASS" || echo "FAIL"
+    rollback: |
+      sysctl -w net.ipv4.icmp_ignore_bogus_error_responses=0
+    notes: "Protects against certain DoS attacks"
+
+  - id: NET-010
+    category: "Kernel Parameter"
+    description: "Ensure broadcast ICMP requests are ignored"
+    severity: "high"
+    apply: |
+      cat >> /etc/sysctl.d/60-netipv4_sysctl.conf <<'EOF'
+      net.ipv4.icmp_echo_ignore_broadcasts = 1
+      EOF
+      sysctl -w net.ipv4.icmp_echo_ignore_broadcasts=1
+    verify: |
+      sysctl net.ipv4.icmp_echo_ignore_broadcasts | grep -q "= 1" && echo "PASS" || echo "FAIL"
+    rollback: |
+      sysctl -w net.ipv4.icmp_echo_ignore_broadcasts=0
+    notes: "Prevents Smurf attacks"
+
+  - id: NET-011
+    category: "Kernel Parameter"
+    description: "Ensure ICMP redirects are not accepted"
+    severity: "high"
+    apply: |
+      cat >> /etc/sysctl.d/60-netipv4_sysctl.conf <<'EOF'
+      net.ipv4.conf.all.accept_redirects = 0
+      net.ipv4.conf.default.accept_redirects = 0
+      net.ipv6.conf.all.accept_redirects = 0
+      net.ipv6.conf.default.accept_redirects = 0
+      EOF
+      sysctl -w net.ipv4.conf.all.accept_redirects=0
+      sysctl -w net.ipv4.conf.default.accept_redirects=0
+      sysctl -w net.ipv6.conf.all.accept_redirects=0
+      sysctl -w net.ipv6.conf.default.accept_redirects=0
+    verify: |
+      if sysctl net.ipv4.conf.all.accept_redirects | grep -q "= 0"; then
+        echo "PASS"
+      else
+        echo "FAIL"
+      fi
+    rollback: |
+      sysctl -w net.ipv4.conf.all.accept_redirects=1
+    notes: "Prevents routing table manipulation"
+
+  - id: NET-012
+    category: "Kernel Parameter"
+    description: "Ensure secure ICMP redirects are not accepted"
+    severity: "high"
+    apply: |
+      cat >> /etc/sysctl.d/60-netipv4_sysctl.conf <<'EOF'
+      net.ipv4.conf.all.secure_redirects = 0
+      net.ipv4.conf.default.secure_redirects = 0
+      EOF
+      sysctl -w net.ipv4.conf.all.secure_redirects=0
+      sysctl -w net.ipv4.conf.default.secure_redirects=0
+    verify: |
+      sysctl net.ipv4.conf.all.secure_redirects | grep -q "= 0" && echo "PASS" || echo "FAIL"
+    rollback: |
+      sysctl -w net.ipv4.conf.all.secure_redirects=1
+    notes: "Even 'secure' redirects can be spoofed"
+
+  - id: NET-013
+    category: "Kernel Parameter"
+    description: "Ensure reverse path filtering is enabled"
+    severity: "high"
+    apply: |
+      cat >> /etc/sysctl.d/60-netipv4_sysctl.conf <<'EOF'
+      net.ipv4.conf.all.rp_filter = 1
+      net.ipv4.conf.default.rp_filter = 1
+      EOF
+      sysctl -w net.ipv4.conf.all.rp_filter=1
+      sysctl -w net.ipv4.conf.default.rp_filter=1
+    verify: |
+      sysctl net.ipv4.conf.all.rp_filter | grep -q "= 1" && echo "PASS" || echo "FAIL"
+    rollback: |
+      sysctl -w net.ipv4.conf.all.rp_filter=0
+    notes: "Prevents IP spoofing"
+
+  - id: NET-014
+    category: "Kernel Parameter"
+    description: "Ensure source routed packets are not accepted"
+    severity: "high"
+    apply: |
+      cat >> /etc/sysctl.d/60-netipv4_sysctl.conf <<'EOF'
+      net.ipv4.conf.all.accept_source_route = 0
+      net.ipv4.conf.default.accept_source_route = 0
+      net.ipv6.conf.all.accept_source_route = 0
+      net.ipv6.conf.default.accept_source_route = 0
+      EOF
+      sysctl -w net.ipv4.conf.all.accept_source_route=0
+      sysctl -w net.ipv4.conf.default.accept_source_route=0
+      sysctl -w net.ipv6.conf.all.accept_source_route=0
+      sysctl -w net.ipv6.conf.default.accept_source_route=0
+    verify: |
+      sysctl net.ipv4.conf.all.accept_source_route | grep -q "= 0" && echo "PASS" || echo "FAIL"
+    rollback: |
+      sysctl -w net.ipv4.conf.all.accept_source_route=1
+    notes: "Source routing can be used for attacks"
+
+  - id: NET-015
+    category: "Kernel Parameter"
+    description: "Ensure suspicious packets are logged"
+    severity: "medium"
+    apply: |
+      cat >> /etc/sysctl.d/60-netipv4_sysctl.conf <<'EOF'
+      net.ipv4.conf.all.log_martians = 1
+      net.ipv4.conf.default.log_martians = 1
+      EOF
+      sysctl -w net.ipv4.conf.all.log_martians=1
+      sysctl -w net.ipv4.conf.default.log_martians=1
+    verify: |
+      sysctl net.ipv4.conf.all.log_martians | grep -q "= 1" && echo "PASS" || echo "FAIL"
+    rollback: |
+      sysctl -w net.ipv4.conf.all.log_martians=0
+    notes: "Logs packets with impossible addresses"
+
+  - id: NET-016
+    category: "Kernel Parameter"
+    description: "Ensure TCP SYN cookies are enabled"
+    severity: "high"
+    apply: |
+      cat >> /etc/sysctl.d/60-netipv4_sysctl.conf <<'EOF'
+      net.ipv4.tcp_syncookies = 1
+      EOF
+      sysctl -w net.ipv4.tcp_syncookies=1
+    verify: |
+      sysctl net.ipv4.tcp_syncookies | grep -q "= 1" && echo "PASS" || echo "FAIL"
+    rollback: |
+      sysctl -w net.ipv4.tcp_syncookies=0
+    notes: "Protects against SYN flood attacks"
+
+  - id: NET-017
+    category: "Kernel Parameter"
+    description: "Ensure IPv6 router advertisements are not accepted"
+    severity: "medium"
+    apply: |
+      cat >> /etc/sysctl.d/60-netipv6_sysctl.conf <<'EOF'
+      net.ipv6.conf.all.accept_ra = 0
+      net.ipv6.conf.default.accept_ra = 0
+      EOF
+      sysctl -w net.ipv6.conf.all.accept_ra=0 2>/dev/null || true
+      sysctl -w net.ipv6.conf.default.accept_ra=0 2>/dev/null || true
+    verify: |
+      if sysctl net.ipv6.conf.all.accept_ra 2>/dev/null | grep -q "= 0"; then
+        echo "PASS"
+      else
+        echo "SKIP"
+      fi
+    rollback: |
+      sysctl -w net.ipv6.conf.all.accept_ra=1 2>/dev/null || true
+    notes: "Prevents rogue IPv6 router advertisements"
+
+  - id: NET-018
+    category: "Kernel Parameter"
+    description: "Apply all sysctl network settings"
+    severity: "high"
+    apply: |
+      sysctl -p /etc/sysctl.d/60-netipv4_sysctl.conf 2>/dev/null || true
+      sysctl -p /etc/sysctl.d/60-netipv6_sysctl.conf 2>/dev/null || true
+      sysctl --system
+    verify: |
+      if [ -f /etc/sysctl.d/60-netipv4_sysctl.conf ]; then
+        echo "PASS"
+      else
+        echo "FAIL"
+      fi
+    rollback: |
+      echo "Settings will revert on reboot if files removed"
+    notes: "Applies all network kernel parameters"
