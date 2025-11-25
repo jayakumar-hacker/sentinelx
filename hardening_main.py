@@ -17,15 +17,15 @@ import json
 class HardeningFramework:
     def __init__(self):
         self.modules = [
-            "01_filesystem",
-            "02_package_management",
-            "03_services",
-            "04_network",
-            "05_firewall",
-            "06_access_control",
-            "07_user_accounts",
-            "08_logging_auditing",
-            "09_system_maintenance"
+            "filesystem",
+            "package_management",
+            "services",
+            "network",
+            "firewall",
+            "access_control",
+            "user_accounts",
+            "logging_auditing",
+            "system_maintenance"
         ]
         
         self.base_dir = Path(__file__).parent
